@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Note by Note — promo tile</title>
+<style>
+  :root {
+    --text: #f0e9db;
+    --muted: #a79d8a;
+    --faint: #6e6656;
+    --accent: #e5a83e;
+    --accent-ink: #f3c577;
+    --font: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --mono: 'SF Mono', 'Roboto Mono', ui-monospace, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; padding: 0; background: #000; }
+
+  .tile {
+    position: relative;
+    width: 440px;
+    height: 280px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 30px 32px;
+    font-family: var(--font);
+    background:
+      radial-gradient(340px 260px at 14% -10%, rgba(229, 168, 62, 0.22), transparent 64%),
+      radial-gradient(300px 230px at 96% 112%, rgba(229, 168, 62, 0.1), transparent 62%),
+      linear-gradient(155deg, #211c15 0%, #14110c 60%, #0e0c09 100%);
+  }
+  /* Faint hairline grid, faded out toward the edges. */
+  .tile::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(238, 228, 208, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(238, 228, 208, 0.035) 1px, transparent 1px);
+    background-size: 40px 40px;
+    mask-image: radial-gradient(300px 240px at 26% 34%, #000 0%, transparent 76%);
+  }
+  .tile > * { position: relative; }
+
+  .row { display: flex; align-items: center; gap: 12px; }
+  .row img { width: 46px; height: 46px; display: block; }
+  .word {
+    font-size: 27px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  /* Matches HeaderBar.svelte: only "by" takes the accent ink. */
+  .word em { font-style: normal; color: var(--accent-ink); }
+
+  p {
+    margin: 16px 0 0;
+    max-width: 27ch;
+    font-size: 16px;
+    line-height: 1.4;
+    color: var(--muted);
+  }
+
+  /* Loop-range accent: the product's own visual idea, in one line. */
+  .lane {
+    position: relative;
+    margin-top: 26px;
+    width: 300px;
+    height: 7px;
+    border-radius: 999px;
+    background: #3a332a;
+  }
+  .lane span {
+    position: absolute;
+    left: 30%;
+    width: 34%;
+    top: -3px;
+    bottom: -3px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--accent), rgba(229, 168, 62, 0.6));
+    box-shadow: 0 0 0 1px rgba(243, 197, 119, 0.45), 0 6px 20px rgba(229, 168, 62, 0.25);
+  }
+  .caption {
+    margin-top: 14px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.12em;
+    color: var(--faint);
+  }
+
+  /* ── b: centred ───────────────────────────────────────────── */
+  .tile.b { align-items: center; text-align: center; }
+  .tile.b::before { mask-image: radial-gradient(280px 240px at 50% 40%, #000 0%, transparent 74%); }
+  .tile.b .row { flex-direction: column; gap: 14px; }
+  .tile.b .row img { width: 58px; height: 58px; }
+  .tile.b .word { font-size: 30px; }
+  .tile.b p { margin-top: 14px; max-width: 30ch; font-size: 15px; }
+  .tile.b .caption { margin-top: 20px; }
+
+  /* ── c: split, with an EQ motif on the right ──────────────── */
+  .tile.c { flex-direction: row; align-items: center; gap: 26px; padding: 30px 28px; }
+  .tile.c .left { flex: 1; min-width: 0; }
+  .tile.c .row img { width: 40px; height: 40px; }
+  .tile.c .word { font-size: 24px; }
+  .tile.c p { margin-top: 13px; max-width: 22ch; font-size: 14.5px; }
+  .tile.c .caption { margin-top: 16px; }
+  .bars {
+    flex: none;
+    display: flex;
+    align-items: flex-end;
+    gap: 7px;
+    height: 168px;
+    padding-left: 22px;
+    border-left: 1px solid rgba(238, 228, 208, 0.08);
+  }
+  .bars i {
+    display: block;
+    width: 9px;
+    border-radius: 5px 5px 3px 3px;
+    background: linear-gradient(180deg, var(--accent-ink), rgba(229, 168, 62, 0.28));
+    box-shadow: 0 0 18px rgba(229, 168, 62, 0.18);
+  }
+
+  /* ── d: type-led ──────────────────────────────────────────── */
+  .tile.d { justify-content: flex-end; padding: 30px 32px 32px; }
+  .tile.d .row { position: absolute; top: 28px; left: 32px; gap: 9px; }
+  .tile.d .row img { width: 30px; height: 30px; }
+  .tile.d .row .word { display: none; }
+  .tile.d .big {
+    font-size: 46px;
+    line-height: 1.02;
+    font-weight: 700;
+    letter-spacing: -0.035em;
+    color: var(--text);
+  }
+  .tile.d .big em { font-style: normal; color: var(--accent-ink); }
+  .tile.d .rule {
+    margin: 18px 0 14px;
+    width: 92px;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--accent);
+    box-shadow: 0 4px 18px rgba(229, 168, 62, 0.35);
+  }
+  .tile.d p { margin: 0; max-width: 34ch; font-size: 14.5px; }
+</style>
+</head>
+<body>
+<!-- role/label only so the capture tool can address the tile as one element. -->
+<div class="tile" id="tile" role="img" aria-label="Note by Note promo tile">
+  <div class="left">
+    <div class="row">
+      <img src="/icon/128.png" alt="">
+      <span class="word">Note <em>by</em> Note</span>
+    </div>
+    <div class="big" hidden id="big">Note <em>by</em><br>Note</div>
+    <div class="rule" hidden id="rule"></div>
+    <p id="tag">Pitch, speed, loops and snippets on any audio or video.</p>
+    <div class="lane" id="lane"><span></span></div>
+    <div class="caption" id="caption">PRACTISE IN THE SIDE PANEL</div>
+  </div>
+  <div class="bars" id="bars" hidden></div>
+</div>
+
+<script>
+// 'b' (centred) is the shipped tile; a/c/d are the alternates it was picked from.
+const variant = new URLSearchParams(location.search).get('v') || 'b';
+const tile = document.getElementById('tile');
+if (variant !== 'a') tile.classList.add(variant);
+
+// The split variant unwraps .left so the flex row can lay the two halves out.
+if (variant !== 'c') {
+  const left = tile.querySelector('.left');
+  left.replaceWith(...left.childNodes);
+}
+
+if (variant === 'c') {
+  // Deterministic EQ-ish silhouette, tallest in the mids like the Guitar preset.
+  const HEIGHTS = [38, 62, 96, 130, 152, 144, 118, 84, 56, 34];
+  const bars = document.getElementById('bars');
+  bars.hidden = false;
+  for (const h of HEIGHTS) {
+    const bar = document.createElement('i');
+    bar.style.height = h + 'px';
+    bars.append(bar);
+  }
+  document.getElementById('lane').hidden = true;
+  // The full caption needs two lines in the narrowed left column.
+  document.getElementById('caption').textContent = 'IN THE SIDE PANEL';
+}
+
+if (variant === 'b') {
+  document.getElementById('lane').hidden = true;
+}
+
+if (variant === 'd') {
+  document.getElementById('big').hidden = false;
+  document.getElementById('rule').hidden = false;
+  document.getElementById('lane').hidden = true;
+  document.getElementById('caption').hidden = true;
+  document.getElementById('tag').textContent =
+    'Pitch, speed, loops and snippets on any audio or video.';
+}
+</script>
+</body>
+</html>

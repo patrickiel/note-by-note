@@ -27,6 +27,10 @@
   import { slide } from 'svelte/transition';
   import KeymapEditor from '../../shortcuts/panel/KeymapEditor.svelte';
 
+  // Read from the manifest rather than a literal, which drifts from
+  // package.json (WXT copies the version across at build time).
+  const version = browser.runtime.getManifest().version;
+
   let {
     onlocalfile,
     ontabaudio,
@@ -833,6 +837,6 @@
       </a>
     </div>
 
-    <footer class="pt-1 pb-3 text-center text-[11px] text-faint">Version 0.1.0</footer>
+    <footer class="pt-1 pb-3 text-center text-[11px] text-faint">Version {version}</footer>
   </div>
 </section>

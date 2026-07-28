@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Note by Note — store shot</title>
+<style>
+  :root {
+    --bg: #161310;
+    --bg-inset: #12100c;
+    --panel: #1e1a15;
+    --text: #f0e9db;
+    --muted: #a79d8a;
+    --faint: #6e6656;
+    --accent: #e5a83e;
+    --accent-ink: #f3c577;
+    --font: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --mono: 'SF Mono', 'Roboto Mono', ui-monospace, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  /* The variant blocks are flex/grid, which would out-specify the UA's
+     `[hidden] { display: none }`. */
+  [hidden] { display: none !important; }
+  html, body { margin: 0; padding: 0; background: #000; }
+  .stage {
+    width: 1280px;
+    height: 800px;
+    display: flex;
+    overflow: hidden;
+    font-family: var(--font);
+    background: var(--bg-inset);
+  }
+
+  /* ── Left: the marketing column ───────────────────────────── */
+  .copy {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 76px 68px;
+    display: flex;
+    flex-direction: column;
+    background:
+      radial-gradient(900px 620px at 12% -12%, rgba(229, 168, 62, 0.16), transparent 62%),
+      radial-gradient(720px 520px at 92% 108%, rgba(229, 168, 62, 0.07), transparent 60%),
+      linear-gradient(160deg, #1b1712 0%, #12100c 62%, #0e0c09 100%);
+  }
+  /* Hairline grid, very faint — keeps the big empty area from reading as flat. */
+  .copy::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(238, 228, 208, 0.028) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(238, 228, 208, 0.028) 1px, transparent 1px);
+    background-size: 64px 64px;
+    mask-image: radial-gradient(760px 620px at 22% 30%, #000 0%, transparent 78%);
+  }
+  .copy > * { position: relative; }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 46px;
+  }
+  .brand img { width: 38px; height: 38px; display: block; }
+  .brand .word {
+    font-size: 19px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--text);
+  }
+  /* Matches HeaderBar.svelte: only "by" takes the accent ink. */
+  .brand .word em { font-style: normal; color: var(--accent-ink); }
+
+  h1 {
+    margin: 0 0 22px;
+    max-width: 15ch;
+    font-size: 50px;
+    line-height: 1.08;
+    letter-spacing: -0.028em;
+    font-weight: 700;
+    color: var(--text);
+  }
+  h1 .hi { color: var(--accent-ink); }
+
+  .sub {
+    margin: 0;
+    max-width: 44ch;
+    font-size: 19px;
+    line-height: 1.55;
+    color: var(--muted);
+  }
+
+  ul {
+    margin: 42px 0 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    max-width: 53ch;
+  }
+  li {
+    position: relative;
+    padding-left: 28px;
+    font-size: 16.5px;
+    line-height: 1.45;
+    color: #d5ccba;
+  }
+  li::before {
+    content: '';
+    position: absolute;
+    left: 4px;
+    top: 8px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 4px rgba(229, 168, 62, 0.14);
+  }
+
+  .foot {
+    margin-top: auto;
+    padding-top: 34px;
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    color: var(--faint);
+    font-family: var(--mono);
+  }
+
+  /* ── Shot 1 variants ──────────────────────────────────────── */
+
+  /* (b) Stat tiles */
+  .stats { display: flex; gap: 14px; margin-top: 46px; max-width: 620px; }
+  .stat {
+    flex: 1;
+    padding: 18px 18px 16px;
+    border-radius: 14px;
+    border: 1px solid rgba(238, 228, 208, 0.09);
+    background: linear-gradient(160deg, rgba(38, 33, 25, 0.9), rgba(23, 20, 15, 0.9));
+  }
+  .stat b {
+    display: block;
+    font-size: 27px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--accent-ink);
+  }
+  .stat span {
+    display: block;
+    margin-top: 5px;
+    font-size: 13px;
+    line-height: 1.35;
+    color: var(--muted);
+  }
+
+  /* (c) Keyboard chips */
+  .keys { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 46px; max-width: 620px; }
+  .key {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 9px 14px 9px 9px;
+    border-radius: 999px;
+    border: 1px solid rgba(238, 228, 208, 0.1);
+    background: rgba(38, 33, 25, 0.75);
+    font-size: 13.5px;
+    color: #d5ccba;
+  }
+  .key kbd {
+    font-family: var(--mono);
+    font-size: 12px;
+    min-width: 26px;
+    padding: 3px 7px;
+    text-align: center;
+    border-radius: 7px;
+    border: 1px solid rgba(238, 228, 208, 0.16);
+    background: #12100c;
+    color: var(--accent-ink);
+  }
+
+  /* (d) Abstract loop-range ribbon */
+  .ribbon { margin-top: 52px; max-width: 620px; }
+  .ribbon .lane {
+    position: relative;
+    height: 10px;
+    border-radius: 999px;
+    background: #3a332a;
+  }
+  .ribbon .range {
+    position: absolute;
+    left: 34%;
+    width: 31%;
+    top: -5px;
+    bottom: -5px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, rgba(229, 168, 62, 0.85), rgba(229, 168, 62, 0.55));
+    box-shadow: 0 0 0 1px rgba(243, 197, 119, 0.5), 0 8px 26px rgba(229, 168, 62, 0.22);
+  }
+  .ribbon .pin {
+    position: absolute;
+    top: -10px;
+    width: 22px;
+    height: 22px;
+    margin-left: -11px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #20160a;
+    font-size: 11px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .ribbon .caps {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 26px;
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    color: var(--faint);
+  }
+
+  /* ── Shot 1's generic player mock ─────────────────────────── */
+  .player {
+    margin-top: 44px;
+    width: 100%;
+    max-width: 620px;
+    border-radius: 14px;
+    border: 1px solid rgba(238, 228, 208, 0.09);
+    background: linear-gradient(150deg, #241f18, #17140f);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
+  }
+  .player .frame {
+    position: relative;
+    height: 232px;
+    background:
+      radial-gradient(420px 200px at 50% 44%, rgba(229, 168, 62, 0.16), transparent 70%),
+      linear-gradient(180deg, #201b15, #131009);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  /* Abstract waveform — stands in for "whatever is playing", no branding. */
+  .wave { display: flex; align-items: center; gap: 5px; height: 96px; opacity: 0.5; }
+  .wave i {
+    display: block;
+    width: 5px;
+    border-radius: 3px;
+    background: linear-gradient(180deg, var(--accent-ink), rgba(229, 168, 62, 0.35));
+  }
+  .player .play {
+    position: absolute;
+    width: 66px;
+    height: 66px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .player .play::after {
+    content: '';
+    border-left: 20px solid #20160a;
+    border-top: 12px solid transparent;
+    border-bottom: 12px solid transparent;
+    margin-left: 5px;
+  }
+  .player .bar { display: flex; align-items: center; gap: 12px; padding: 13px 16px; }
+  .player .track {
+    flex: 1;
+    height: 4px;
+    border-radius: 999px;
+    background: #3a332a;
+    overflow: hidden;
+  }
+  .player .track span { display: block; width: 61%; height: 100%; background: var(--accent); }
+  .player .time { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+
+  /* ── Right: the real side panel ───────────────────────────── */
+  .dock {
+    flex: 0 0 400px;
+    width: 400px;
+    height: 800px;
+    position: relative;
+    border-left: 1px solid rgba(238, 228, 208, 0.1);
+    box-shadow: -30px 0 70px rgba(0, 0, 0, 0.55);
+    background: var(--panel);
+  }
+  .dock iframe { width: 400px; height: 800px; border: 0; display: block; }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="copy">
+    <div class="brand">
+      <img src="/icon/128.png" alt="">
+      <span class="word">Note <em>by</em> Note</span>
+    </div>
+    <h1 id="h1"></h1>
+    <p class="sub" id="sub"></p>
+    <ul id="bullets"></ul>
+
+    <!-- Variants for shot 1, one shown at a time (?v=). -->
+    <div class="stats" id="v-stats" hidden>
+      <div class="stat"><b>±12</b><span>semitones, pitch only</span></div>
+      <div class="stat"><b>25–200%</b><span>speed, pitch unchanged</span></div>
+      <div class="stat"><b>10-band</b><span>EQ + vocal reducer</span></div>
+    </div>
+
+    <div class="keys" id="v-keys" hidden>
+      <span class="key"><kbd>Space</kbd> Play / pause</span>
+      <span class="key"><kbd>M</kbd> Drop a marker</span>
+      <span class="key"><kbd>L</kbd> Loop it</span>
+      <span class="key"><kbd>C</kbd> Save as snippet</span>
+      <span class="key"><kbd>↑ ↓</kbd> Transpose</span>
+      <span class="key"><kbd>P</kbd> Bypass</span>
+    </div>
+
+    <div class="ribbon" id="v-ribbon" hidden>
+      <div class="lane">
+        <span class="range"></span>
+        <span class="pin" style="left:34%">6</span>
+        <span class="pin" style="left:65%">7</span>
+      </div>
+      <div class="caps"><span>00:00</span><span>LOOP · 02:08 → 02:58</span><span>03:50</span></div>
+    </div>
+
+    <div class="player" id="player" hidden>
+      <div class="frame">
+        <div class="wave" id="wave"></div>
+        <div class="play"></div>
+      </div>
+      <div class="bar">
+        <span class="time">02:21</span>
+        <span class="track"><span></span></span>
+        <span class="time">03:50</span>
+      </div>
+    </div>
+    <div class="foot" id="foot"></div>
+  </div>
+  <div class="dock"><iframe id="panel" src="/sidepanel?mock=1"></iframe></div>
+</div>
+
+<script>
+const SHOTS = {
+  1: {
+    h1: 'Practise along with <span class="hi">anything</span> that plays in your browser',
+    sub: "Note by Note opens in the side panel and processes the page's audio live — drop a song into your key, slow a solo down, and it still sounds like music.",
+    foot: 'YOUTUBE  ·  BACKING TRACKS  ·  STREAMS  ·  LOCAL FILES',
+    section: null,
+    // ?v= picks what fills the lower left: a = nothing but bullets,
+    // b = stat tiles, c = shortcut chips, d = loop ribbon, e = player mock.
+    bullets: [
+      'Transpose and slow down without the chipmunk effect',
+      'Loop a phrase, chain practice passes, mark the hard parts',
+      'Works on streams, backing tracks and files on your disk',
+    ],
+  },
+  2: {
+    h1: 'Mark the hard parts. <span class="hi">Loop</span> them until they stick.',
+    sub: 'Drop markers as you listen, then click a tile to loop that section — or drag across two tiles to loop everything in between.',
+    bullets: [
+      'Loop any range, with an optional count-in',
+      'Name, nudge and re-time markers as you go',
+      'Saved per track, so it is all there next time',
+    ],
+    foot: 'LOOPER',
+    section: 'Looper',
+  },
+  3: {
+    h1: 'Chain practice passes and <span class="hi">let it run</span>.',
+    sub: 'Save a loop as a snippet, give it its own speed and repeat count, then chain snippets into a sequence that plays itself.',
+    bullets: [
+      'Four passes at 50%, three at 75%, two at full speed',
+      'Per-snippet speed, transpose and vocal level',
+      'Keeps running after you close the panel',
+    ],
+    foot: 'SNIPPETS',
+    section: 'Snippets',
+  },
+  4: {
+    h1: 'Push the vocal back. Bring the <span class="hi">guitar</span> forward.',
+    sub: 'A vocal reducer written for this project thins the centre-panned voice, and a 10-band EQ leans the mix toward whatever you are playing.',
+    bullets: [
+      'Reduce or isolate the centre channel',
+      'Guitar, Bass, Drums and Vocals EQ presets, plus your own',
+      'Everything live, with one-click bypass to A/B it',
+    ],
+    foot: 'EFFECTS',
+    section: 'Effects',
+  },
+  5: {
+    h1: 'Your practice data <span class="hi">stays yours</span>.',
+    sub: 'No accounts, no telemetry, no analytics, no ads. Every effect — pitch, speed, vocal reduction, EQ, chord detection — runs locally in your browser.',
+    bullets: [
+      'Nothing requested at install: site access is asked once, on your first Connect',
+      'Cross-device sync is optional, switches off in one tap, and carries no audio',
+      'Free software under the GPL — the whole source is on GitHub',
+    ],
+    foot: 'PRIVACY',
+    settings: 'Sync',
+  },
+};
+
+const q = new URLSearchParams(location.search);
+const shot = SHOTS[q.get('s') || '1'];
+const variant = q.get('v') || 'a';
+document.getElementById('h1').innerHTML = shot.h1;
+document.getElementById('sub').textContent = shot.sub;
+document.getElementById('foot').textContent = shot.foot;
+const ul = document.getElementById('bullets');
+for (const b of shot.bullets || []) {
+  const li = document.createElement('li');
+  li.textContent = b;
+  ul.append(li);
+}
+const VARIANT_EL = { b: 'v-stats', c: 'v-keys', d: 'v-ribbon', e: 'player' };
+if (shot.section === null && VARIANT_EL[variant]) {
+  document.getElementById(VARIANT_EL[variant]).hidden = false;
+}
+if (shot.section === null && variant === 'e') {
+  // The bullets and the player mock together overflow 800px.
+  ul.hidden = true;
+  // Deterministic pseudo-waveform so re-runs render identically.
+  const wave = document.getElementById('wave');
+  for (let i = 0; i < 58; i++) {
+    const bar = document.createElement('i');
+    const h = 14 + Math.abs(Math.sin(i * 0.7) * 44 + Math.sin(i * 0.23) * 34);
+    bar.style.height = h.toFixed(1) + 'px';
+    wave.append(bar);
+  }
+}
+
+/** Drive the real panel into the state this shot is about. */
+window.__ready = false;
+const iframe = document.getElementById('panel');
+iframe.addEventListener('load', () => {
+  const doc = iframe.contentDocument;
+  const settle = () => {
+    const scroller = doc.querySelector('.flex-1.overflow-y-auto');
+    if (!scroller) return setTimeout(settle, 100);
+
+    // The panel scrolls internally; its scrollbar only clutters a still image.
+    const hide = doc.createElement('style');
+    hide.textContent =
+      '.overflow-y-auto{scrollbar-width:none}.overflow-y-auto::-webkit-scrollbar{display:none}';
+    doc.head.append(hide);
+
+    const headFor = (name) =>
+      [...doc.querySelectorAll('.section-head')].find(
+        (el) => el.textContent.trim().toLowerCase().startsWith(name.toLowerCase()),
+      );
+
+    for (const name of shot.collapse || []) headFor(name)?.querySelector('button')?.click();
+
+    /** Scroll `el`'s own scroll parent so `el` sits just below the top edge. */
+    const bringToTop = (box, el) => {
+      const top =
+        el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
+      box.scrollTop = Math.max(0, top - 10);
+    };
+
+    setTimeout(() => {
+      if (shot.settings) {
+        // The Settings sheet is its own full-height scroller over the panel.
+        doc.querySelector('button[aria-label="Settings"]').click();
+        setTimeout(() => {
+          const sheet = [...doc.querySelectorAll('*')].filter(
+            (el) =>
+              el.scrollHeight > el.clientHeight + 20 &&
+              /auto|scroll/.test(getComputedStyle(el).overflowY),
+          ).pop();
+          const head = [...sheet.querySelectorAll('h2, h3')].find(
+            (h) => h.textContent.trim() === shot.settings,
+          );
+          if (head) bringToTop(sheet, head);
+          setTimeout(() => (window.__ready = true), 350);
+        }, 300);
+        return;
+      }
+      if (shot.section) {
+        const head = headFor(shot.section);
+        if (head) bringToTop(scroller, head);
+      } else {
+        scroller.scrollTop = 0;
+      }
+      setTimeout(() => (window.__ready = true), 350);
+    }, 250);
+  };
+  setTimeout(settle, 400);
+});
+</script>
+</body>
+</html>

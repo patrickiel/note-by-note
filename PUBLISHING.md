@@ -56,17 +56,20 @@ Check before uploading:
 
 ## Step 3 — Store assets (shared by both listings)
 
-Produce these once, reuse for both stores:
+~~Produce these once~~ — **done**, they live in [store/](store/) and are reused
+for both listings. See [store/README.md](store/README.md) for the upload order
+and for how to regenerate them after a UI change.
 
-- **Icon** — `public/icon/128.png` already exists.
-- **Screenshots** — at least 3, `1280×800` (Chrome accepts `640×400` too; AMO is
-  flexible). Good set: side panel next to a YouTube video, the timeline with
-  markers and a loop range, the snippet chain, the EQ + vocal reducer.
-- **Short description** — reuse the manifest line: *"Practice music with pitch,
-  speed, loops, and snippets on any audio or video."* (Chrome caps at 132 chars.)
-- **Long description** — adapt "What it does" from the README. State plainly:
-  no telemetry, no analytics, sync is opt-out and carries no audio.
-- **Promo tile** (Chrome, optional) — `440×280`.
+- **Icon** — [store/icon-128.png](store/icon-128.png) (copy of `public/icon/128.png`).
+- **Screenshots** — five `1280×800` PNGs in [store/screenshots/](store/screenshots/):
+  the panel docked beside a page, the timeline with markers and a loop range,
+  the snippet chain, the vocal reducer + EQ, and the privacy/sync settings.
+  Chrome takes at most five; AMO takes all of them.
+- **Short description** — [store/short-description.txt](store/short-description.txt),
+  the manifest line (76 of Chrome's 132 chars).
+- **Long description** — [store/long-description.txt](store/long-description.txt).
+  Plain text; both stores render line breaks but not Markdown.
+- **Promo tile** (Chrome, optional) — [store/promo-tile-440x280.png](store/promo-tile-440x280.png).
 
 ---
 
