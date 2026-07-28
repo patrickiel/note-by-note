@@ -1,0 +1,82 @@
+name: Bug report
+description: Something in the extension misbehaves
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Audio bugs are almost always site-specific and browser-specific, so the
+        first three fields matter more than they look.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open <page>
+        2. Set pitch to +3
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: site
+    attributes:
+      label: Site
+      description: Where it happens — a URL if you can share one, otherwise the site name. "Local file" is a valid answer.
+      placeholder: https://www.youtube.com/watch?v=...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: browser
+    attributes:
+      label: Browser
+      options:
+        - Chrome
+        - Edge
+        - Firefox
+        - Brave
+        - Other Chromium
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: Browser version and extension version
+      placeholder: Chrome 141, extension 0.1.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: connection
+    attributes:
+      label: What did the panel's status show?
+      description: The banner at the top of the side panel.
+      options:
+        - Connected (normal)
+        - Connected via tab capture
+        - Pitch not available
+        - No player found
+        - Detecting / stuck
+        - Something else, or I did not look
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console errors
+      description: >
+        Optional but very useful. Errors from the page console (F12) and from
+        the side panel (right-click the panel → Inspect). Paste as text.
+      render: text

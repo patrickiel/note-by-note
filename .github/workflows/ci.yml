@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A second push to the same PR cancels the run still in flight.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  extension:
+    name: check / test / build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Must come before setup-node so `cache: pnpm` can find the store.
+      # Version comes from the `packageManager` field in package.json.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # postinstall does the work that makes the rest possible: wxt prepare,
+      # copying rb.wasm, and building the three worklet bundles into
+      # public/worklets/ (generated, not committed).
+      - run: pnpm install --frozen-lockfile
+
+      - name: Type check
+        run: pnpm check
+
+      - name: DSP unit tests
+        run: pnpm test:dsp
+
+      - name: Build (Chrome)
+        run: pnpm build
+
+      - name: Build (Firefox)
+        run: pnpm build:firefox
+
+  server:
+    name: sync server
+    runs-on: ubuntu-latest
+    # Separate pnpm workspace with its own lockfile and its own tsconfig
+    # (Cloudflare Workers types), excluded from the root tsconfig — so `pnpm
+    # check` above does not cover it.
+    steps:
+      - uses: actions/checkout@v4
+
+      # No `version:` input — it reads `packageManager` from the root
+      # package.json, and passing both is an error.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: pnpm install --frozen-lockfile
+        working-directory: server
+
+      - name: Type check
+        run: pnpm run check
+        working-directory: server
+
+# The e2e suite (e2e/run.mjs) is deliberately not run here: it needs a real
+# Chrome download plus generated WAV fixtures, and it is not currently
+# all-green (22/30 — see CONTRIBUTING.md). Run it locally for changes to the
+# DSP or the connection state machine.

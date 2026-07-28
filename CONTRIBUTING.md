@@ -25,9 +25,12 @@ pnpm test:dsp   # node --test, the DSP unit tests
 pnpm build      # production build → .output/chrome-mv3
 ```
 
-There is no CI — please run all three yourself and say so in the PR. If your
-change touches `server/`, run its `pnpm run check` too. There is no ESLint or
-Prettier config either, deliberately — match the style of the code around you.
+CI runs all three on every pull request, plus the Firefox build and `server/`'s
+own `pnpm run check`. Run them locally first anyway; the
+turnaround is much faster than waiting on a runner. (A first-time contributor's
+workflow run needs a maintainer to click approve, so it may sit for a bit.)
+There is no ESLint or Prettier config, deliberately — match the style of the
+code around you.
 
 For the browser-level e2e suite (it plays a 440 Hz tone and asserts on the
 *processed* output), see the Tests section of [README.md](README.md).

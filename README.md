@@ -216,7 +216,8 @@ and no analytics.
 
 ## License
 
-GPL-2.0-or-later — see [LICENSE](LICENSE).
+GPL-2.0-or-later — see [LICENSE](LICENSE) for the full text and
+[NOTICE](NOTICE) for the project's copyright and third-party notices.
 
 The copyleft comes from Rubber Band, which is used here under its GPL option.
 Anything distributed on top of this has to ship its source under the GPL as well,

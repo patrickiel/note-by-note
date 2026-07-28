@@ -1,0 +1,26 @@
+name: Feature request
+description: Suggest something the extension should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to practise?
+      description: >
+        The musical situation, not the implementation. Knowing what you are
+        working on usually suggests a better feature than the one requested.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you have in mind
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do today instead
+      description: Workarounds, other tools, or "nothing — I gave up".
