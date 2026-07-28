@@ -1,8 +1,9 @@
-<p align="center">
-  <img src="public/icon/128.png" alt="Note by Note" width="96" height="96">
-</p>
 
 <h1 align="center">Note by Note</h1>
+
+<p align="center">
+  <img src="store/screenshots/1-overview.png" alt="The Note by Note side panel: transpose, pitch and speed controls, vocal reducer and 10-band EQ, a looper timeline with markers, chained snippets, and a detected chord chart" width="420">
+</p>
 
 Note by Note is a browser extension for practicing along with music you didn't
 record: a YouTube lesson, a backing track, an mp3 on your disk. It opens in the
@@ -10,9 +11,6 @@ side panel and processes the page's audio in real time, so you can drop a song
 into your instrument's key, slow a solo to half speed without the chipmunk
 effect, and loop four bars until they stick.
 
-<p align="center">
-  <img src="public/screenshots/sceenshot1.png" alt="The Note by Note side panel: transpose, pitch and speed controls, vocal reducer and 10-band EQ, a looper timeline with markers, chained snippets, and a detected chord chart" width="420">
-</p>
 
 Chrome 116+ (MV3, side panel). Built with [WXT](https://wxt.dev), Svelte 5 and
 TypeScript; pitch and time-stretching come from the
@@ -102,10 +100,10 @@ for both targets.
 
 Two Chromium APIs have no Firefox equivalent, so the two builds differ:
 
-| | Chromium | Firefox |
-| --- | --- | --- |
-| Panel surface | `side_panel` + `sidePanel.open()` | `sidebar_action` + `sidebarAction.toggle()` |
-| Tab capture fallback | `tabCapture` + `offscreen` | **absent** — direct mode only |
+|                      | Chromium                          | Firefox                                     |
+| -------------------- | --------------------------------- | ------------------------------------------- |
+| Panel surface        | `side_panel` + `sidePanel.open()` | `sidebar_action` + `sidebarAction.toggle()` |
+| Tab capture fallback | `tabCapture` + `offscreen`        | **absent** — direct mode only               |
 
 [src/core/platform.ts](src/core/platform.ts) exports the flags every caller
 gates on (`CAN_CAPTURE_TAB`, `HAS_SIDE_PANEL_API`). They come from
