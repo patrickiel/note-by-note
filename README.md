@@ -10,6 +10,10 @@ side panel and processes the page's audio in real time, so you can drop a song
 into your instrument's key, slow a solo to half speed without the chipmunk
 effect, and loop four bars until they stick.
 
+<p align="center">
+  <img src="public/screenshots/sceenshot1.png" alt="The Note by Note side panel: transpose, pitch and speed controls, vocal reducer and 10-band EQ, a looper timeline with markers, chained snippets, and a detected chord chart" width="420">
+</p>
+
 Chrome 116+ (MV3, side panel). Built with [WXT](https://wxt.dev), Svelte 5 and
 TypeScript; pitch and time-stretching come from the
 [Rubber Band Library](https://breakfastquay.com/rubberband/) realtime R3 engine,
