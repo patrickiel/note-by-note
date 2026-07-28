@@ -81,7 +81,7 @@ if (!existing?.storage) {
     runtime: {
       id: 'note-by-note-dev-shim',
       getURL: (path: string) => path,
-      getManifest: () => ({ version: '0.1.0' }),
+      getManifest: () => ({ version: '1.0.0' }),
       onConnect: makeEvent(),
       onMessage: makeEvent(),
       connect: () => ({

@@ -73,5 +73,5 @@ jobs:
 
 # The e2e suite (e2e/run.mjs) is deliberately not run here: it needs a real
 # Chrome download plus generated WAV fixtures, and it is not currently
-# all-green (22/30 — see CONTRIBUTING.md). Run it locally for changes to the
-# DSP or the connection state machine.
+# all-green — see CONTRIBUTING.md, which tracks the count. Run it locally for
+# changes to the DSP or the connection state machine.

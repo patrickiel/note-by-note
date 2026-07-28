@@ -8,7 +8,7 @@
 
 - [ ] Tried it in a real browser (`pnpm dev`)
 - [ ] `node e2e/run.mjs` — required if this touches the DSP or the connection
-      state machine. The suite is not all-green (22/30); compare against a clean
+      state machine. The suite is not all-green; compare against a clean
       checkout rather than assuming your change caused a failure.
 - [ ] Firefox, if the change is anything but panel-internal
 - [ ] Worklet bundles rebuilt, if a `*.worklet.ts` or `center-cut-dsp.ts` changed

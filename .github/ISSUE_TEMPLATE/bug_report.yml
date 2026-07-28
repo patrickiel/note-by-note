@@ -53,7 +53,9 @@ body:
     id: versions
     attributes:
       label: Browser version and extension version
-      placeholder: Chrome 141, extension 0.1.0
+      description: >
+        Browser version: `chrome://version` in Chromium, `about:support` in
+        Firefox. Extension version: `chrome://extensions` or `about:addons`.
     validations:
       required: true
 

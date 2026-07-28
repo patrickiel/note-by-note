@@ -14,7 +14,7 @@ everything after it is mechanical.
 | --- | --- | --- |
 | 0.1 | ~~Privacy policy URL~~ — **done** | [PRIVACY.md](PRIVACY.md). Both stores want a URL, so use `https://github.com/patrickiel/note-by-note/blob/main/PRIVACY.md` (or a GitHub Pages copy). Re-check the wording matches the shipped build before each submission. |
 | 0.2 | ~~Firefox data-collection claim~~ — **done** | `data_collection_permissions` is now `{ required: ['browsingActivity'] }` — sync uploads Recent/Favorites, which carry page URLs and titles, and it is on by default. Answer the AMO data form the same way: *browsing activity*, required, no other categories. |
-| 0.3 | **Version number** | `package.json` is `0.1.0`. Store versions can only ever go up and can't be reused. Bump to `1.0.0` for the first public release. |
+| 0.3 | ~~Version number~~ — **done** | `package.json` is `1.0.0`; WXT copies it into both manifests. Store versions can only ever go up and can't be reused, so a withdrawn or rejected `1.0.0` still burns the number — bump to `1.0.1` rather than resubmitting it. |
 | 0.4 | **Who operates the sync Worker** | [PRIVACY.md](PRIVACY.md) names the author as operator and points at `note-by-note-sync.oapp.workers.dev`. If that changes, both the policy and `SYNC_ENDPOINT` in [api.ts](src/features/sync/panel/api.ts) have to change with it. |
 | 0.5 | **GPL is fine here** | GPL-2.0-or-later is allowed on both stores. Only the Apple App Stores are off-limits (Rubber Band's own guidance) — irrelevant for browser extensions. |
 
