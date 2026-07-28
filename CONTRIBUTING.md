@@ -14,8 +14,11 @@ Windows-only except the e2e harness, which globs for `chrome-win64`.
 
 **`pnpm install` is mandatory before anything audio-related works.** The three
 AudioWorklet bundles under `public/worklets/` are generated, not committed —
-`postinstall` runs `wxt prepare`, copies the Rubber Band WASM, and builds all
-three with esbuild. A checkout without it will type-check but fail at runtime.
+`postinstall` copies the Rubber Band WASM, builds all three with esbuild, and
+*then* runs `wxt prepare`. That order matters: `wxt prepare` derives the
+`PublicPath` union from whatever is actually sitting in `public/`, so preparing
+first leaves `browser.runtime.getURL('/worklets/…')` a type error in three
+files.
 
 ## The gates
 
