@@ -1,0 +1,6 @@
+# Makes server/ its own install root (the repo root is a pnpm config root),
+# and lets wrangler's runtime (workerd) install its binary.
+allowBuilds:
+  esbuild: true
+  workerd: true
+  sharp: true

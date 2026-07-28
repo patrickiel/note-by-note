@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Note by Note test track</title>
+  </head>
+  <body>
+    <h1>Note by Note E2E test page</h1>
+    <audio id="player" src="/tone-440.wav" controls loop></audio>
+    <script>
+      // Autoplay is enabled via launch flag; start immediately.
+      const el = document.getElementById('player');
+      el.play().catch(() => {});
+    </script>
+  </body>
+</html>

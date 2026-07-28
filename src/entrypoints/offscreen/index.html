@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Hosts the tab-capture pipeline, which needs the Chromium-only
+         `offscreen` API. Nothing in the Firefox build can reach this page. -->
+    <meta name="manifest.exclude" content="['firefox']" />
+    <title>Note by Note offscreen audio</title>
+  </head>
+  <body>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

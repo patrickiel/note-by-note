@@ -1,0 +1,10 @@
+{
+  "extends": "./.wxt/tsconfig.json",
+  "compilerOptions": {
+    // Unit tests run via Node type-stripping, which needs explicit .ts
+    // extensions on relative imports.
+    "allowImportingTsExtensions": true
+  },
+  // The sync worker has its own tsconfig with Cloudflare types.
+  "exclude": ["server"]
+}

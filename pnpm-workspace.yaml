@@ -1,0 +1,12 @@
+# Not a monorepo (server/ has its own workspace) — this file exists only to
+# hold pnpm settings, which pnpm 11 reads here rather than from package.json.
+packages: []
+
+# Dependency build scripts. esbuild installs its native binary (the worklet
+# build scripts depend on it) → allow. protobufjs (transitive via
+# onnxruntime-web, unused in the browser bundle) and spawn-sync (legacy shim)
+# aren't needed → deny, so `pnpm install` doesn't error on them.
+allowBuilds:
+  esbuild: true
+  protobufjs: false
+  spawn-sync: false

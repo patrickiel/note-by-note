@@ -1,0 +1,301 @@
+/* Note by Note design tokens. Warm-neutral theme with one amber accent.
+   Dark is the default (:root); light is activated with `data-theme="light"`
+   on <html>, set by the panel's applyTheme() from the user's Theme setting —
+   "Auto" follows the OS `prefers-color-scheme`, "Light"/"Dark" pin it.
+   The palette is committed (no user-tunable hue). */
+
+/* Tailwind v4: utilities only, no Preflight — our base reset (below) stays
+   authoritative. Tokens are mapped in so utilities read `bg-surface` /
+   `text-muted`. */
+@layer theme, base, components, utilities;
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+
+@theme inline {
+  --color-base: var(--bg);
+  --color-surface: var(--bg-panel);
+  --color-surface-2: var(--bg-panel-2);
+  --color-inset: var(--bg-inset);
+  --color-hover: var(--bg-hover);
+  --color-fg: var(--text);
+  --color-muted: var(--text-muted);
+  --color-faint: var(--text-faint);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-softer: var(--accent-softer);
+  --color-accent-line: var(--accent-line);
+  --color-accent-contrast: var(--accent-contrast);
+  --color-accent-ink: var(--accent-ink);
+  --color-danger: var(--danger);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+}
+
+/* Radii/fonts collide with Tailwind's own namespaces (inline would be circular)
+   and are theme-static, so mirror the values directly. */
+@theme {
+  --radius-sm: 8px;
+  --radius-md: 12px; /* medium elements (timeline, popovers) */
+  --font-mono: 'SF Mono', 'Roboto Mono', ui-monospace, Consolas, monospace;
+}
+
+/* Shared ghost-button treatment: hover fill unless disabled, dimmed when. */
+@utility ghost {
+  &:hover:not(:disabled) {
+    background: var(--bg-hover);
+    color: var(--text);
+  }
+  &:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+}
+
+/* Uppercase, tracked section label (Playback / Effects / Looper / Snippets).
+   A utility so it can't lose the cascade to a scoped element rule. */
+@utility section-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* Section header row — the uppercase label plus any inline controls (toggles,
+   icon buttons). One fixed row height + left indent so every section title sits
+   the same distance from the cards above and below, matching Playback/Effects,
+   regardless of which controls the row carries. Controls are capped compact so a
+   tall button can't inflate the row and give the label a lopsided halo. */
+@utility section-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 20px;
+  padding-left: 4px;
+
+  & .icon-btn {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+:root {
+  color-scheme: dark;
+
+  /* Warm-neutral surface ramp — amber-tinted charcoals, each step ~+5 in
+     lightness; --border is a faint warm-white hairline so a card edge reads
+     as a seam rather than a drawn line. */
+  --bg: #161310;
+  --bg-panel: #1e1a15;
+  --bg-panel-2: #262119;
+  --bg-inset: #12100c;
+  --bg-hover: #262119;
+  --bg-active: #2e2820;
+
+  /* Text — warm off-white through taupe. */
+  --text: #f0e9db;
+  --text-muted: #a79d8a;
+  --text-faint: #6e6656;
+
+  /* Accent — one fixed amber. `--accent-contrast` is the dark ink used on amber
+     fills; `--accent-ink` is amber as readable foreground on dark surfaces. */
+  --accent: #e5a83e;
+  --accent-hover: #f0b955;
+  --accent-soft: rgba(229, 168, 62, 0.15);
+  --accent-softer: rgba(229, 168, 62, 0.08);
+  --accent-line: rgba(229, 168, 62, 0.2);
+  --accent-contrast: #20160a;
+  --accent-ink: #f3c577;
+  --accent-ink-hover: #f7d089;
+
+  /* Semantic */
+  --danger: #e0655a;
+  --ok: #58c08a;
+  --border: rgba(238, 228, 208, 0.08);
+  --border-strong: rgba(238, 228, 208, 0.14);
+  --shadow:
+    0 1px 2px rgba(0, 0, 0, 0.25), 0 8px 24px rgba(0, 0, 0, 0.18);
+
+  /* Top sheen on .surface cards — a barely-there warm-white lift. */
+  --sheen: rgba(255, 255, 255, 0.022);
+
+  /* Controls */
+  --track: #3a332a;
+  --thumb: var(--text);
+  --thumb-border: var(--accent);
+  --thumb-shadow: 0 1px 5px rgba(0, 0, 0, 0.5);
+  --toggle-off: var(--bg-panel-2);
+  --toggle-knob: #8d8471;
+  --toggle-knob-on: var(--accent-contrast);
+
+  /* Layout */
+  --radius: 16px;
+  --radius-sm: 8px;
+  --radius-pill: 999px;
+  --font:
+    'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, sans-serif;
+  --font-mono: 'SF Mono', 'Roboto Mono', ui-monospace, Consolas, monospace;
+}
+
+/* ── Light theme ──────────────────────────────────────────────
+   Same warm-neutral family, inverted ramp: warm paper background, cards a
+   step lighter (near-white), recesses a step darker. The amber accent keeps
+   its hue/identity; only its *foreground* roles darken so text-on-light
+   contrast holds, and hover deepens instead of brightening. */
+[data-theme='light'] {
+  color-scheme: light;
+
+  /* Surface ramp — warm paper → cream card → pure white raised; inset and
+     hover step *down* in lightness (the mirror of the dark ramp). */
+  --bg: #f4efe6;
+  --bg-panel: #fdfaf3;
+  --bg-panel-2: #ffffff;
+  --bg-inset: #ece5d6;
+  --bg-hover: #efe9db;
+  --bg-active: #e7dfcd;
+
+  /* Text — warm espresso through khaki (kept off pure-black so it belongs to
+     the warm-neutral palette rather than punching against the cream cards). */
+  --text: #3d3320;
+  --text-muted: #6d6350;
+  --text-faint: #a29881;
+
+  /* Accent — same amber on fills (dark ink keeps reading on it); as a
+     foreground color it deepens to bronze for legibility on light surfaces. */
+  --accent: #e5a83e;
+  --accent-hover: #d4992c;
+  --accent-soft: rgba(190, 130, 20, 0.16);
+  --accent-softer: rgba(190, 130, 20, 0.09);
+  --accent-line: rgba(190, 130, 20, 0.28);
+  --accent-contrast: #241806;
+  --accent-ink: #8a5f0d;
+  --accent-ink-hover: #6f4c09;
+
+  /* Semantic */
+  --danger: #cf4436;
+  --ok: #2f9e6e;
+  --border: rgba(66, 52, 26, 0.1);
+  --border-strong: rgba(66, 52, 26, 0.17);
+  --shadow:
+    0 1px 2px rgba(66, 52, 26, 0.06), 0 8px 24px rgba(66, 52, 26, 0.09);
+
+  /* Cards are already near-white, so the sheen becomes a soft top highlight. */
+  --sheen: rgba(255, 255, 255, 0.55);
+
+  /* Controls — light track with a white thumb/knob (classic light-mode
+     affordance); the accent border/fill still carries the state. */
+  --track: #ded5c1;
+  --thumb: #ffffff;
+  --thumb-border: var(--accent-hover);
+  --thumb-shadow: 0 1px 2px rgba(66, 52, 26, 0.2);
+  --toggle-off: #d9cfba;
+  --toggle-knob: #ffffff;
+  --toggle-knob-on: #ffffff;
+}
+
+/* Base reset (Preflight is off). Must be @layer base so Tailwind's utilities,
+   a later layer, win over these element rules on buttons/inputs. */
+@layer base {
+  /* Borders start at 0 width, solid style, so width-only `border-*` render. */
+  *,
+  ::before,
+  ::after {
+    box-sizing: border-box;
+    border: 0 solid;
+  }
+
+  /* No ring for pointer interaction; keyboard nav gets a themed ring. */
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent-ink);
+    outline-offset: 1px;
+  }
+
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+  }
+  body {
+    font-family: var(--font);
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--text);
+    /* Faint amber wash from the top edge, over the warm base. */
+    background:
+      radial-gradient(
+        900px 460px at 50% -12%,
+        rgba(229, 168, 62, 0.05),
+        transparent 60%
+      ),
+      var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+  #app {
+    height: 100%;
+  }
+  button {
+    font: inherit;
+    color: inherit;
+    background: none;
+    padding: 0;
+    cursor: pointer;
+  }
+  input,
+  select {
+    font: inherit;
+    color: inherit;
+  }
+}
+
+/* @layer components so per-element utilities can override .surface. */
+@layer components {
+  /* Shared card treatment — warm surface, hairline seam, soft top sheen and a
+     layered drop shadow, generous radius. `.raised` bumps nested cards up the
+     ramp to separate from their parent. */
+  .surface {
+    background:
+      linear-gradient(180deg, var(--sheen), transparent 40%),
+      var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+  }
+  .surface.raised {
+    background:
+      linear-gradient(180deg, var(--sheen), transparent 40%),
+      var(--bg-panel-2);
+  }
+
+  /* Boxed numeric field (tempo bpm, reference-tuning Hz) — one shared look. */
+  .num-input {
+    width: 52px;
+    padding: 3px 4px;
+    text-align: center;
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .num-input::placeholder {
+    color: var(--text-faint);
+    font-weight: 400;
+  }
+  .num-input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .num-input:disabled {
+    opacity: 0.4;
+  }
+}

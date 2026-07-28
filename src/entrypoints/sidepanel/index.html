@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Firefox's MV2 `sidebar_action` defaults to browser_style: true, which
+         loads chrome://browser/content/extension.css into this page as an
+         *author* sheet. It sits in an anonymous @layer, so it outranks every
+         named layer in theme.css: it blanks the body background, forces
+         `font: caption` (a 12px root, which rescales every rem-based Tailwind
+         size — the transport bar shrinks and clips), and ships legacy widget
+         rules. WXT maps this meta tag to sidebar_action.browser_style. -->
+    <meta name="manifest.browser_style" content="false" />
+    <title>Note by Note</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

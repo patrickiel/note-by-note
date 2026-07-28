@@ -1,0 +1,45 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+.output
+stats.html
+stats-*.json
+.wxt
+web-ext.config.ts
+
+# Cloudflare Workers
+.wrangler
+.dev.vars
+.dev.vars.*
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Note by Note
+.browsers
+# Generated once by `node e2e/make-tone.mjs` / `node e2e/make-stereo-mix.mjs`.
+e2e/fixtures/tone-440.wav
+e2e/fixtures/stereo-mix.wav
+# Generated at postinstall / build:before from the @echogarden/rubberband-wasm
+# glue (rb.wasm itself is committed). See scripts/build-rubberband-worklet.mjs.
+public/worklets/rubberband-worklet.js
+# Generated at postinstall / build:before. See scripts/build-pcm-tap-worklet.mjs.
+public/worklets/pcm-tap-worklet.js
+# Generated at postinstall / build:before. See scripts/build-vocal-worklet.mjs.
+public/worklets/vocal-reducer-worklet.js
+export/
