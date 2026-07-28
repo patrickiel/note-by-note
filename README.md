@@ -2,7 +2,7 @@
 <h1 align="center">Note by Note</h1>
 
 <p align="center">
-  <img src="store/screenshots/1-overview.png" alt="The Note by Note side panel: transpose, pitch and speed controls, vocal reducer and 10-band EQ, a looper timeline with markers, chained snippets, and a detected chord chart" width="420">
+  <img src="store/screenshots/1-overview.png" alt="The Note by Note side panel: transpose, pitch and speed controls, vocal reducer and 10-band EQ, a looper timeline with markers, chained snippets, and a detected chord chart" width="100%">
 </p>
 
 Note by Note is a browser extension for practicing along with music you didn't
