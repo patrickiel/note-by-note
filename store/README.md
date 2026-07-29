@@ -10,6 +10,7 @@ for both. See [PUBLISHING.md](../PUBLISHING.md) Step 3 for where each piece goes
 | [long-description.txt](long-description.txt) | Chrome "Detailed description" / AMO description. Plain text, no markup: both fields render line breaks but not Markdown |
 | [screenshots/](screenshots/) | Five 1280×800 PNGs. Chrome accepts at most five; AMO takes all of them |
 | [promo-tile-440x280.png](promo-tile-440x280.png) | Chrome small promo tile (optional) |
+| [promo-tile-1400x560.png](promo-tile-1400x560.png) | Chrome large promo tile / marquee (optional, only used for editorial featuring) |
 
 Screenshot order is the order they should be uploaded in — the first one is the
 listing's hero:
@@ -25,7 +26,8 @@ listing's hero:
 The screenshots are the **real side panel**, not a mockup: `store-shot.html`
 iframes `sidepanel.html?mock=1` at its native 400 px width and drives it into
 the state each shot is about (scrolling to a section, opening Settings). The
-left half is listing copy. `store-promo.html` is standalone.
+left half is listing copy. `store-promo.html` draws the 440×280 tile standalone,
+but its 1400×560 marquee (`?size=marquee`) docks the same live panel.
 
 Both pages have to be served from the same origin as the panel, so they are
 copied into the build output rather than served from here:
@@ -41,6 +43,20 @@ Then, in a browser window sized to exactly 1280×800, capture:
 - `http://localhost:4321/store-shot?s=1` … `?s=5`
 - `http://localhost:4321/store-promo` (capture the `.tile` element, not the
   viewport — Chrome will not shrink a window below ~500 px wide)
+- `http://localhost:4321/store-promo?size=marquee` — same, in a window wider
+  than 1400 px. Both `store-shot` and the marquee set `window.__ready` once the
+  panel has settled; wait for it before capturing.
+
+Chrome wants **24-bit PNG with no alpha** for screenshots and both tiles, and a
+DevTools/Puppeteer element capture writes RGBA. Flatten afterwards:
+
+```powershell
+Add-Type -AssemblyName System.Drawing
+$img = [System.Drawing.Image]::FromFile($src)
+$bmp = New-Object System.Drawing.Bitmap($img.Width, $img.Height, [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
+$g = [System.Drawing.Graphics]::FromImage($bmp); $g.DrawImage($img, 0, 0, $img.Width, $img.Height); $g.Dispose()
+$bmp.Save($dst, [System.Drawing.Imaging.ImageFormat]::Png)
+```
 
 Use the extensionless URLs. `serve` redirects `/store-shot.html?s=2` to
 `/store-shot` and **drops the query string**, which silently gives you shot 1

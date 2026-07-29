@@ -69,7 +69,11 @@ and for how to regenerate them after a UI change.
   the manifest line (76 of Chrome's 132 chars).
 - **Long description** — [store/long-description.txt](store/long-description.txt).
   Plain text; both stores render line breaks but not Markdown.
-- **Promo tile** (Chrome, optional) — [store/promo-tile-440x280.png](store/promo-tile-440x280.png).
+- **Promo tiles** (Chrome, optional) — small
+  [store/promo-tile-440x280.png](store/promo-tile-440x280.png) and large/marquee
+  [store/promo-tile-1400x560.png](store/promo-tile-1400x560.png). Neither is
+  required to submit; the marquee only matters if Chrome's editors consider the
+  listing for a featured collection.
 
 ---
 

@@ -41,6 +41,8 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test:dsp": "node --test \"src/features/**/*.test.ts\"",
     "test:e2e": "node e2e/run.mjs",
+    "release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1",
+    "release:dry": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1 -DryRun",
     "postinstall": "node scripts/copy-rubberband-wasm.mjs && node scripts/build-rubberband-worklet.mjs && node scripts/build-vocal-worklet.mjs && node scripts/build-pcm-tap-worklet.mjs && wxt prepare"
   },
   "devDependencies": {

@@ -147,6 +147,88 @@
     box-shadow: 0 4px 18px rgba(229, 168, 62, 0.35);
   }
   .tile.d p { margin: 0; max-width: 34ch; font-size: 14.5px; }
+
+  /* ── Große Werbekachel: ?size=marquee, 1400×560 ───────────────
+     5:2 is a letterbox — the centred tile would be mostly dead space.
+     The marquee docks the real side panel on the right instead, the
+     same way store-shot.html does, so the tile shows the product
+     rather than a motif standing in for it. */
+  .tile.marquee {
+    width: 1400px;
+    height: 560px;
+    flex-direction: row;
+    align-items: stretch;
+    padding: 0;
+    background:
+      radial-gradient(1080px 830px at 14% -10%, rgba(229, 168, 62, 0.22), transparent 64%),
+      radial-gradient(950px 730px at 96% 112%, rgba(229, 168, 62, 0.1), transparent 62%),
+      linear-gradient(155deg, #211c15 0%, #14110c 60%, #0e0c09 100%);
+  }
+  .tile.marquee::before {
+    background-size: 84px 84px;
+    mask-image: radial-gradient(760px 500px at 26% 34%, #000 0%, transparent 78%);
+  }
+  .tile.marquee .left {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 60px 76px;
+  }
+  .tile.marquee .row { gap: 20px; }
+  .tile.marquee .row img { width: 84px; height: 84px; }
+  .tile.marquee .word { font-size: 50px; }
+  .tile.marquee p {
+    margin-top: 28px;
+    max-width: 610px;
+    font-size: 33px;
+    line-height: 1.34;
+    color: #d5ccba;
+  }
+  .tile.marquee .caption { margin-top: 30px; font-size: 19px; letter-spacing: 0.14em; }
+
+  /* Three lines of substance, so the left half isn't a caption in a void.
+     Same dot bullet as the screenshots' copy column. */
+  .feats {
+    margin: 28px 0 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    max-width: 640px;
+  }
+  .feats li {
+    position: relative;
+    padding-left: 32px;
+    font-size: 20px;
+    line-height: 1.4;
+    color: #d5ccba;
+  }
+  .feats li::before {
+    content: '';
+    position: absolute;
+    left: 4px;
+    top: 9px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 4px rgba(229, 168, 62, 0.14);
+  }
+
+  /* The real panel, at its native 400 px width — cropped to the tile's
+     height the way it is cropped by a short browser window. */
+  .dock {
+    flex: 0 0 400px;
+    width: 400px;
+    height: 560px;
+    border-left: 1px solid rgba(238, 228, 208, 0.1);
+    box-shadow: -30px 0 70px rgba(0, 0, 0, 0.55);
+    background: #1e1a15;
+  }
+  .dock iframe { width: 400px; height: 560px; border: 0; display: block; }
 </style>
 </head>
 <body>
@@ -160,25 +242,36 @@
     <div class="big" hidden id="big">Note <em>by</em><br>Note</div>
     <div class="rule" hidden id="rule"></div>
     <p id="tag">Pitch, speed, loops and snippets on any audio or video.</p>
+    <ul class="feats" id="feats" hidden>
+      <li>Transpose and slow down without the chipmunk effect</li>
+      <li>Loop the hard part, chain practice passes, mark your place</li>
+      <li>YouTube, backing tracks, streams and files on your disk</li>
+    </ul>
     <div class="lane" id="lane"><span></span></div>
     <div class="caption" id="caption">PRACTISE IN THE SIDE PANEL</div>
   </div>
   <div class="bars" id="bars" hidden></div>
+  <div class="dock" id="dock" hidden><iframe id="panel" title="Note by Note side panel"></iframe></div>
 </div>
 
 <script>
-// 'b' (centred) is the shipped tile; a/c/d are the alternates it was picked from.
-const variant = new URLSearchParams(location.search).get('v') || 'b';
+// 'b' (centred) is the shipped 440×280 tile; a/c/d are the alternates it was
+// picked from. ?size=marquee is the 1400×560 tile, which has its own layout —
+// the a–d variants don't apply to it.
+const params = new URLSearchParams(location.search);
+const marquee = params.get('size') === 'marquee';
+const variant = params.get('v') || 'b';
 const tile = document.getElementById('tile');
-if (variant !== 'a') tile.classList.add(variant);
+if (marquee) tile.classList.add('marquee');
+else if (variant !== 'a') tile.classList.add(variant);
 
-// The split variant unwraps .left so the flex row can lay the two halves out.
-if (variant !== 'c') {
+// The split variant and the marquee keep .left as a column; the rest unwrap it.
+if (!marquee && variant !== 'c') {
   const left = tile.querySelector('.left');
   left.replaceWith(...left.childNodes);
 }
 
-if (variant === 'c') {
+if (!marquee && variant === 'c') {
   // Deterministic EQ-ish silhouette, tallest in the mids like the Guitar preset.
   const HEIGHTS = [38, 62, 96, 130, 152, 144, 118, 84, 56, 34];
   const bars = document.getElementById('bars');
@@ -193,17 +286,46 @@ if (variant === 'c') {
   document.getElementById('caption').textContent = 'IN THE SIDE PANEL';
 }
 
-if (variant === 'b') {
+if (!marquee && variant === 'b') {
   document.getElementById('lane').hidden = true;
 }
 
-if (variant === 'd') {
+if (!marquee && variant === 'd') {
   document.getElementById('big').hidden = false;
   document.getElementById('rule').hidden = false;
   document.getElementById('lane').hidden = true;
   document.getElementById('caption').hidden = true;
   document.getElementById('tag').textContent =
     'Pitch, speed, loops and snippets on any audio or video.';
+}
+
+if (marquee) {
+  document.getElementById('lane').hidden = true;
+  document.getElementById('feats').hidden = false;
+  const dock = document.getElementById('dock');
+  dock.hidden = false;
+
+  // Same handshake as store-shot.html: the capture waits on __ready, because
+  // the mock panel needs a beat to render before it is worth photographing.
+  window.__ready = false;
+  const iframe = document.getElementById('panel');
+  iframe.addEventListener('load', () => {
+    const doc = iframe.contentDocument;
+    const settle = () => {
+      const scroller = doc.querySelector('.flex-1.overflow-y-auto');
+      if (!scroller) return setTimeout(settle, 100);
+      // The panel scrolls internally; its scrollbar only clutters a still image.
+      const hide = doc.createElement('style');
+      hide.textContent =
+        '.overflow-y-auto{scrollbar-width:none}.overflow-y-auto::-webkit-scrollbar{display:none}';
+      doc.head.append(hide);
+      scroller.scrollTop = 0;
+      setTimeout(() => (window.__ready = true), 350);
+    };
+    setTimeout(settle, 400);
+  });
+  // Set src last so the load listener can't miss a cached frame.
+  iframe.src = '/sidepanel?mock=1';
 }
 </script>
 </body>

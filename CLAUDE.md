@@ -14,7 +14,16 @@ pnpm check            # svelte-check / TypeScript — the only type/lint gate
 pnpm build            # production build → .output/chrome-mv3
 pnpm zip              # store package
 pnpm test:dsp         # fast DSP unit tests (node --test on src/features/**/*.test.ts)
+pnpm release:dry      # show the release plan (version bump, tag) without changing anything
+pnpm release          # full release: check + test, bump patch, build both zips, commit, tag, push
 ```
+
+[scripts/release.ps1](scripts/release.ps1) is the release path. It refuses to run on a dirty tree, on a
+branch other than `main`, when `main` is behind `origin/main`, or when the tag already exists; unpushed
+commits are fine (they go out with the release). Non-patch bumps take a flag, so run the script directly:
+`.\scripts\release.ps1 -Bump minor` (also `-Bump major`, `-Version 2.0.0`, `-SkipTests`, `-Branch <name>`).
+If a build fails after the version was written, the bump is reverted. The zips land in `.output/`
+(Chrome store zip, Firefox zip, and the sources zip AMO requires).
 
 - `WXT_NO_LAUNCH=1 pnpm dev` skips the auto-launched browser; load `.output/chrome-mv3` unpacked in a normal Chrome (HMR still connects).
 - **UI preview without an extension context** (mock data + in-memory `chrome` shim): build, serve `.output/chrome-mv3` statically, open `sidepanel.html?mock=1`.
