@@ -7,7 +7,9 @@ for both. See [PUBLISHING.md](../PUBLISHING.md) Step 3 for where each piece goes
 | --- | --- |
 | [icon-128.png](icon-128.png) | Store icon (copy of `public/icon/128.png`) |
 | [short-description.txt](short-description.txt) | Chrome "Short description" (132 char cap) / AMO summary — 76 chars |
-| [long-description.txt](long-description.txt) | Chrome "Detailed description" / AMO description. Plain text, no markup: both fields render line breaks but not Markdown |
+| [long-description.txt](long-description.txt) | Chrome "Detailed description". Plain text, no markup — the field renders line breaks but not Markdown |
+| [long-description-firefox.md](long-description-firefox.md) | AMO "Description". Markdown (AMO supports bold/italic/links/lists, **but not headings**, so sections are bold lines). Also differs on substance: sidebar not side panel, no tab-capture fallback, Firefox 140+ |
+| [privacy-policy-firefox.md](privacy-policy-firefox.md) | AMO "Privacy Policy" field, which takes text rather than a URL. [PRIVACY.md](../PRIVACY.md) reflowed into AMO's Markdown subset (no headings, no tables) and with the Chrome-only `tabCapture`/`offscreen` row dropped |
 | [screenshots/](screenshots/) | Five 1280×800 PNGs. Chrome accepts at most five; AMO takes all of them |
 | [promo-tile-440x280.png](promo-tile-440x280.png) | Chrome small promo tile (optional) |
 | [promo-tile-1400x560.png](promo-tile-1400x560.png) | Chrome large promo tile / marquee (optional, only used for editorial featuring) |

@@ -67,8 +67,15 @@ and for how to regenerate them after a UI change.
   Chrome takes at most five; AMO takes all of them.
 - **Short description** — [store/short-description.txt](store/short-description.txt),
   the manifest line (76 of Chrome's 132 chars).
-- **Long description** — [store/long-description.txt](store/long-description.txt).
-  Plain text; both stores render line breaks but not Markdown.
+- **Long description** — one per store, because the two fields differ in both
+  markup and substance:
+  - Chrome — [store/long-description.txt](store/long-description.txt). Plain
+    text; the field renders line breaks but not Markdown.
+  - Firefox — [store/long-description-firefox.md](store/long-description-firefox.md).
+    AMO renders a limited Markdown set (bold, italic, links, lists — **no
+    headings**). It also drops the tab-capture paragraph (Chromium-only), says
+    *sidebar* rather than *side panel*, and states Firefox 140+ instead of
+    Chrome 116+. Keep the two in sync when the copy changes.
 - **Promo tiles** (Chrome, optional) — small
   [store/promo-tile-440x280.png](store/promo-tile-440x280.png) and large/marquee
   [store/promo-tile-1400x560.png](store/promo-tile-1400x560.png). Neither is
@@ -105,6 +112,15 @@ and for how to regenerate them after a UI change.
    Output: .output/note-by-note-<version>-firefox.zip
    Note: pnpm install (postinstall) generates the AudioWorklet bundles under
    public/worklets/ — they are intentionally not committed.
+
+   The validator's two warnings are both in third-party code:
+   - chunks/ort.wasm.bundle.min-*.js "unsafe call to import" — onnxruntime-web
+     loading its own wasm glue by variable URL. It resolves to a bundled asset;
+     nothing is fetched from the network (no CDN references in the package).
+   - chunks/settings.svelte-*.js "unsafe assignment to innerHTML" — the Svelte 5
+     runtime's <template> helper, on compile-time-constant markup, via its
+     "svelte-trusted-html" Trusted Types policy. Our own source contains no
+     innerHTML and no {@html}.
    ```
 4. Confirm the manifest's `data_collection_permissions` matches what you answer in the data-collection form (Step 0.2) — a mismatch is a rejection.
 5. Reuse the listing text and screenshots from Step 3. License: **GPL-2.0-or-later**.
