@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Screencast Director — Note by Note</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b23; --line: #262d38;
+    --text: #e8ecf1; --dim: #8b95a3; --accent: #4fa3ff;
+    --ok: #3ecf8e; --warn: #f5b942; --over: #ff6b6b;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", system-ui, sans-serif;
+    height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+    user-select: none;
+  }
+
+  /* Top bar: overall progress */
+  #topbar { display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--line); }
+  #overall { font-variant-numeric: tabular-nums; font-size: 20px; color: var(--dim); }
+  #overall b { color: var(--text); font-size: 24px; }
+  #bar { flex: 1; height: 8px; background: var(--panel); border-radius: 4px; overflow: hidden; }
+  #barfill { height: 100%; width: 0%; background: var(--accent); transition: width .3s linear; }
+  #shotcount { color: var(--dim); font-size: 18px; }
+  #nextbtn {
+    background: var(--panel); color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 18px; font-size: 17px; font-family: inherit;
+    cursor: pointer; touch-action: manipulation;
+  }
+  #nextbtn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Main stage */
+  #stage { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 24px 40px; gap: 18px; min-height: 0; }
+  #shotnum { color: var(--accent); font-size: 22px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+  #action { font-size: clamp(28px, 4.5vw, 52px); font-weight: 650; line-height: 1.25; }
+  #caption { font-size: clamp(18px, 2.2vw, 26px); color: var(--warn); font-style: italic; }
+  #caption::before { content: "Caption overlay: "; color: var(--dim); font-style: normal; font-size: .75em; }
+
+  /* Shot timer */
+  #shottimer { display: flex; align-items: baseline; gap: 14px; }
+  #elapsed { font-size: clamp(48px, 8vw, 96px); font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ok); }
+  #elapsed.warn { color: var(--warn); } #elapsed.over { color: var(--over); }
+  #target { font-size: 24px; color: var(--dim); }
+
+  /* Next up */
+  #next { padding: 14px 20px; border-top: 1px solid var(--line); background: var(--panel); color: var(--dim); font-size: 18px; }
+  #next b { color: var(--text); }
+
+  /* Footer: keys */
+  #keys { display: flex; gap: 22px; padding: 10px 20px; border-top: 1px solid var(--line); color: var(--dim); font-size: 15px; flex-wrap: wrap; }
+  kbd { background: var(--panel); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 1px 8px; font-family: inherit; color: var(--text); }
+
+  /* Overlays: idle + countdown + done */
+  .overlay { position: fixed; inset: 0; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; text-align: center; padding: 40px; z-index: 10; }
+  .overlay h1 { font-size: clamp(32px, 5vw, 56px); }
+  .overlay p { color: var(--dim); font-size: 20px; max-width: 640px; line-height: 1.5; }
+  #countnum { font-size: clamp(120px, 30vw, 280px); font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .hidden { display: none !important; }
+  #donestats { font-size: 22px; color: var(--text); line-height: 1.8; }
+  #donestats td { padding: 2px 14px; font-variant-numeric: tabular-nums; }
+  #donestats .over { color: var(--over); } #donestats .ok { color: var(--ok); }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div id="overall"><b>0.0</b> / 75 s</div>
+  <div id="bar"><div id="barfill"></div></div>
+  <div id="shotcount">Shot – / 8</div>
+  <button id="nextbtn">Next ▶</button>
+</div>
+
+<div id="stage">
+  <div id="shotnum"></div>
+  <div id="action"></div>
+  <div id="caption"></div>
+  <div id="shottimer">
+    <div id="elapsed">0.0</div>
+    <div id="target"></div>
+  </div>
+</div>
+
+<div id="next"></div>
+
+<div id="keys">
+  <span><kbd>Space</kbd> skip to next shot early</span>
+  <span><kbd>←</kbd> back one shot</span>
+  <span><kbd>P</kbd> pause / resume</span>
+  <span><kbd>R</kbd> restart</span>
+  <span><kbd>F</kbd> fullscreen</span>
+</div>
+
+<div id="idle" class="overlay">
+  <h1>🎬 Screencast Director</h1>
+  <p>Put this window on a second monitor (or phone). Start your screen recording first,
+     then press <b>Space</b> — you get a 3-second countdown, and the director walks you
+     through all 8 shots, <b>advancing automatically on pace</b> (timer goes yellow near
+     the end of a shot so you can wrap the action). <b>Space</b> skips ahead early,
+     <b>P</b> pauses if something goes wrong, <b>←</b> steps back a shot.</p>
+  <p style="font-size:17px">Target: ~75 s total · captions are added in editing, shown here for context</p>
+  <h1 style="font-size:28px">Press <kbd>Space</kbd> to begin</h1>
+</div>
+
+<div id="countdown" class="overlay hidden"><div id="countnum">3</div></div>
+
+<div id="done" class="overlay hidden">
+  <h1>That's a wrap 🎉</h1>
+  <table id="donestats"></table>
+  <p>Stop the screen recording. Trim dead time between shots, add the captions,
+     export MP4 &lt; 90 s, and test-upload to r/test as a native Reddit video.</p>
+  <p><kbd>R</kbd> to run it again</p>
+</div>
+
+<script>
+const SHOTS = [
+  { sec: 6,  action: "YouTube playing, panel closed. Open the side panel.",                          caption: "Any YouTube video becomes a practice tool" },
+  { sec: 10, action: "Drag transpose to −2 while audio plays. Let the key change be heard.",         caption: "Into your key — speed untouched" },
+  { sec: 10, action: "Pull speed to 50% on a fast lick. Pitch stays put.",                           caption: "Half speed, no chipmunk" },
+  { sec: 12, action: "Drop 2–3 markers, click a marker tile → section loops. Show the count-in.",    caption: "Mark it. Loop it. Count-in." },
+  { sec: 14, action: "Save loop as snippet, chain 50%×4 → 75%×3 → 100%×2. Let it advance on its own.", caption: "Chain snippets: 50 → 75 → full speed, hands-free" },
+  { sec: 10, action: "Toggle vocal reducer — vocals duck. Quick EQ preset flip.",                    caption: "Push the vocals down, bring the band forward" },
+  { sec: 8,  action: "Show the chord chart under the timeline, playhead tracking chords.",           caption: "Chord detection (beta) — runs on your machine" },
+  { sec: 5,  action: "Close the tab, reopen the video: markers and loops restore.",                  caption: "It remembers every video. Free & open source — Note by Note" },
+];
+
+const $ = id => document.getElementById(id);
+let state = "idle";          // idle | countdown | running | paused | done
+let shot = 0;
+let shotStart = 0, shotAccum = 0;      // per-shot ms
+let totalStart = 0, totalAccum = 0;    // overall ms
+let actuals = [];                      // seconds per completed shot
+let raf, countTimer;
+
+function fmt(ms) { return (ms / 1000).toFixed(1); }
+function now() { return performance.now(); }
+
+function render() {
+  const s = SHOTS[shot];
+  $("shotnum").textContent = `Shot ${shot + 1} of ${SHOTS.length}`;
+  $("shotcount").textContent = `Shot ${shot + 1} / ${SHOTS.length}`;
+  $("action").textContent = s.action;
+  $("caption").textContent = s.caption;
+  $("target").textContent = `/ ~${s.sec} s target`;
+  const n = SHOTS[shot + 1];
+  $("next").innerHTML = n ? `Next: <b>${n.action}</b>` : `Next: <b>last shot — end on the panel, hold 1 s</b>`;
+}
+
+function tick() {
+  if (state !== "running") return;
+  const shotMs = shotAccum + (now() - shotStart);
+  const totalMs = totalAccum + (now() - totalStart);
+  const t = SHOTS[shot].sec * 1000;
+  if (shotMs >= t) {
+    advance(1);
+    if (state === "running") raf = requestAnimationFrame(tick);
+    return;
+  }
+  const el = $("elapsed");
+  el.textContent = fmt(shotMs);
+  el.className = shotMs > t ? "over" : shotMs > t * 0.75 ? "warn" : "";
+  $("overall").innerHTML = `<b>${fmt(totalMs)}</b> / 75 s`;
+  $("barfill").style.width = Math.min(100, totalMs / 750) + "%";
+  $("barfill").style.background = totalMs > 75000 ? "var(--over)" : "var(--accent)";
+  raf = requestAnimationFrame(tick);
+}
+
+function startCountdown() {
+  state = "countdown";
+  $("idle").classList.add("hidden");
+  $("countdown").classList.remove("hidden");
+  let n = 3;
+  $("countnum").textContent = n;
+  countTimer = setInterval(() => {
+    n--;
+    if (n > 0) { $("countnum").textContent = n; return; }
+    clearInterval(countTimer);
+    $("countdown").classList.add("hidden");
+    state = "running";
+    shot = 0; actuals = [];
+    shotStart = totalStart = now();
+    shotAccum = totalAccum = 0;
+    render(); tick();
+  }, 1000);
+}
+
+function advance(dir) {
+  if (state !== "running" && state !== "paused") return;
+  if (state === "paused") togglePause();
+  if (dir > 0) {
+    actuals[shot] = (shotAccum + now() - shotStart) / 1000;
+    if (shot === SHOTS.length - 1) return finish();
+    shot++;
+  } else if (shot > 0) {
+    shot--;
+  }
+  shotStart = now(); shotAccum = 0;
+  render();
+}
+
+function togglePause() {
+  if (state === "running") {
+    state = "paused";
+    shotAccum += now() - shotStart;
+    totalAccum += now() - totalStart;
+    cancelAnimationFrame(raf);
+    $("elapsed").textContent += " ⏸";
+  } else if (state === "paused") {
+    state = "running";
+    shotStart = totalStart = now();
+    tick();
+  }
+}
+
+function finish() {
+  state = "done";
+  cancelAnimationFrame(raf);
+  const total = (totalAccum + now() - totalStart) / 1000;
+  let rows = SHOTS.map((s, i) => {
+    const a = actuals[i];
+    const cls = a != null && a > s.sec + 2 ? "over" : "ok";
+    return `<tr><td>Shot ${i + 1}</td><td class="${cls}">${a != null ? a.toFixed(1) : "–"} s</td><td style="color:var(--dim)">target ${s.sec} s</td></tr>`;
+  }).join("");
+  rows += `<tr><td><b>Total</b></td><td class="${total > 90 ? "over" : "ok"}"><b>${total.toFixed(1)} s</b></td><td style="color:var(--dim)">target 75 s (max 90)</td></tr>`;
+  $("donestats").innerHTML = rows;
+  $("done").classList.remove("hidden");
+}
+
+function restart() {
+  cancelAnimationFrame(raf); clearInterval(countTimer);
+  state = "idle";
+  $("done").classList.add("hidden");
+  $("countdown").classList.add("hidden");
+  $("idle").classList.remove("hidden");
+  $("overall").innerHTML = `<b>0.0</b> / 75 s`;
+  $("barfill").style.width = "0%";
+}
+
+document.addEventListener("keydown", e => {
+  if (e.code === "Space") {
+    e.preventDefault();
+    if (state === "idle") startCountdown();
+    else advance(1);
+  }
+  else if (e.code === "ArrowLeft") advance(-1);
+  else if (e.key === "p" || e.key === "P") togglePause();
+  else if (e.key === "r" || e.key === "R") restart();
+  else if (e.key === "f" || e.key === "F") {
+    document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+  }
+});
+
+// Deliberate targets only — a stray click to focus the window must not skip shots.
+$("idle").addEventListener("pointerdown", () => { if (state === "idle") startCountdown(); });
+$("nextbtn").addEventListener("pointerdown", e => { e.stopPropagation(); advance(1); });
+</script>
+</body>
+</html>
