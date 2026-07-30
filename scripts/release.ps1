@@ -161,6 +161,9 @@ if ($notesText -match '(?ms)^.*?(?=^## )') { $notesText = $notesText.Substring($
 if ($LASTEXITCODE -eq 0 -and $notesText -match '^(## |Maintenance release)') {
   $notesFile = Join-Path $root ".output\release-notes-$new.md"
   [IO.File]::WriteAllText($notesFile, $notesText + "`n")
+  # Plain-text twin for the stores' "what's new" fields (they don't render Markdown).
+  $plainText = ($notesText -replace '(?m)^##\s+', '' -replace '\*\*', '')
+  [IO.File]::WriteAllText((Join-Path $root ".output\release-notes-$new.txt"), $plainText + "`n")
   Write-Host ($notesText -replace '(?m)^', '    ') -ForegroundColor DarkGray
   $notesArgs = @('--notes-file', $notesFile)
 }
