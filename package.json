@@ -3,7 +3,7 @@
   "description": "Practice music with pitch, speed, loops, and snippets on any audio or video.",
   "private": true,
   "license": "GPL-2.0-or-later",
-  "version": "1.0.1",
+  "version": "1.0.0",
   "type": "module",
   "author": "Patrick Demichiel",
   "repository": {

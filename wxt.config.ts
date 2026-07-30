@@ -83,7 +83,8 @@ export default defineConfig({
     ...(mode === 'testing' ? { host_permissions: ['<all_urls>'] } : {}),
     name:
       browser === 'firefox'
-        ? 'Note by Note ♪ Pitch Shifter ♯ Transpose ♭ Slow Down ⏱ Loop'
+        // AMO hard-caps manifest name at 45 characters.
+        ? 'Note by Note ♪ Pitch Shifter ♭ Slow Down'
         : 'Note by Note ♪ Pitch Shifter ♯ Transpose ♭ Slow Down ⏱ Loop ⟳ Vocal Remover',
     short_name: 'Note by Note',
     description: 'Practice music with pitch, speed, loops, and snippets on any audio or video.',
