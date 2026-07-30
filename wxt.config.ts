@@ -81,7 +81,11 @@ export default defineConfig({
   manifest: ({ mode, browser }) => ({
     // E2E runs can't click native permission prompts — grant hosts up front.
     ...(mode === 'testing' ? { host_permissions: ['<all_urls>'] } : {}),
-    name: 'Note by Note',
+    name:
+      browser === 'firefox'
+        ? 'Note by Note ♪ Pitch Shifter ♯ Transpose ♭ Slow Down ⏱ Loop'
+        : 'Note by Note ♪ Pitch Shifter ♯ Transpose ♭ Slow Down ⏱ Loop ⟳ Vocal Remover',
+    short_name: 'Note by Note',
     description: 'Practice music with pitch, speed, loops, and snippets on any audio or video.',
     homepage_url: 'https://github.com/patrickiel/note-by-note',
     ...(browser === 'firefox'
