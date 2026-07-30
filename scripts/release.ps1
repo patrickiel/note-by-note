@@ -149,7 +149,7 @@ $prevTag = git tag --sort=-v:refname --list 'v*' | Where-Object { $_ -ne $tag } 
 $range = if ($prevTag) { "$prevTag..$tag" } else { $tag }
 $commits = (git log $range --no-merges --pretty='format:%s%n%b----') -join "`n"
 $instructions = Get-Content (Join-Path $PSScriptRoot 'release-notes-instructions.md') -Raw
-# UTF-8 both ways across the pipe — PS 5.1 otherwise mangles non-ASCII (em dashes etc.).
+# UTF-8 both ways across the pipe - PS 5.1 otherwise mangles non-ASCII (em dashes etc.).
 $prevOutEnc = [Console]::OutputEncoding; $prevPipeEnc = $OutputEncoding
 [Console]::OutputEncoding = [Text.Encoding]::UTF8; $OutputEncoding = [Text.Encoding]::UTF8
 $notes = "$instructions`nCommits in this release ($range), separated by ----:`n`n$commits" | claude -p
@@ -165,7 +165,7 @@ if ($LASTEXITCODE -eq 0 -and $notesText -match '^(## |Maintenance release)') {
   $notesArgs = @('--notes-file', $notesFile)
 }
 else {
-  Write-Host '    claude -p failed — falling back to GitHub auto-generated notes.' -ForegroundColor Yellow
+  Write-Host '    claude -p failed - falling back to GitHub auto-generated notes.' -ForegroundColor Yellow
 }
 
 Step 'Creating the GitHub release'
@@ -175,7 +175,7 @@ $zips = Get-ChildItem (Join-Path $root '.output') -Filter '*.zip' |
 # Non-fatal: the tag is pushed either way, so a gh hiccup shouldn't fail the release.
 & gh @(@('release', 'create', $tag, '--verify-tag', '--title', "Note by Note $new") + $notesArgs + $zips)
 if ($LASTEXITCODE -ne 0) {
-  Write-Host "    gh release create failed — create it manually: gh release create $tag --generate-notes .output\*$new*.zip" -ForegroundColor Yellow
+  Write-Host "    gh release create failed - create it manually: gh release create $tag --generate-notes .output\*$new*.zip" -ForegroundColor Yellow
 }
 
 Step "Released $tag"
