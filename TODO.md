@@ -1,4 +1,2 @@
 # To-Do
-
-- [ ] squash git change timestamps
-- [ ] Release
+- recents should be only pages with audio
