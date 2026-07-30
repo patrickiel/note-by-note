@@ -18,6 +18,16 @@ Non-patch bump: `.\scripts\release.ps1 -Bump minor` (or `-Bump major`,
 - `note-by-note-<version>-chrome.zip`
 - `note-by-note-<version>-firefox.zip` + `note-by-note-<version>-sources.zip`
 
+The script also creates the **GitHub release** (`gh release create` with all
+three zips attached — GPL source availability + sideload fallback). The notes
+are written by `claude -p` from the commit log, following the fixed format in
+[scripts/release-notes-instructions.md](scripts/release-notes-instructions.md)
+(auto-notes fallback if that fails). If only that step failed, run it manually:
+
+```powershell
+gh release create v<version> --generate-notes .output\*<version>*.zip
+```
+
 Optional pre-flight before releasing: `pnpm wxt build --mode testing ; node e2e/run.mjs`.
 
 Sanity-check the zips if anything about the build changed:
@@ -62,11 +72,6 @@ The validator's two warnings are both in third-party code:
 If the data-collection answers ever change, the manifest's
 `data_collection_permissions` and the AMO form must match — a mismatch is a
 rejection.
-
-## 4 — After both are live
-
-Cut a GitHub release on the `v<version>` tag and attach both extension zips
-(GPL source availability + sideload fallback).
 
 ## When listing content changes
 

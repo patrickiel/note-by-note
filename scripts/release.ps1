@@ -103,6 +103,8 @@ if ($DryRun) {
   Write-Host "      set package.json version to $new" -ForegroundColor Yellow
   Write-Host '      pnpm zip ; pnpm zip:firefox' -ForegroundColor Yellow
   Write-Host "      git commit -m 'Release $tag' ; git tag -a $tag ; git push origin $Branch --follow-tags" -ForegroundColor Yellow
+  Write-Host "      claude -p (release notes per scripts/release-notes-instructions.md)" -ForegroundColor Yellow
+  Write-Host "      gh release create $tag (with the notes and zips attached)" -ForegroundColor Yellow
   exit 0
 }
 
@@ -138,8 +140,44 @@ $bumped = $false
 Run 'git' @('tag', '-a', $tag, '-m', "Release $tag")
 Run 'git' @('push', 'origin', $Branch, '--follow-tags')
 
-Step "Released $tag"
-Get-ChildItem (Join-Path $root '.output') -Filter '*.zip' |
+# --- 6. GitHub release with the zips attached ---------------------------------
+# Notes are written by Claude from the commit log, following the fixed format in
+# scripts/release-notes-instructions.md; falls back to GitHub's auto-notes.
+Step 'Generating release notes'
+$notesArgs = @('--generate-notes')
+$prevTag = git tag --sort=-v:refname --list 'v*' | Where-Object { $_ -ne $tag } | Select-Object -First 1
+$range = if ($prevTag) { "$prevTag..$tag" } else { $tag }
+$commits = (git log $range --no-merges --pretty='format:%s%n%b----') -join "`n"
+$instructions = Get-Content (Join-Path $PSScriptRoot 'release-notes-instructions.md') -Raw
+# UTF-8 both ways across the pipe — PS 5.1 otherwise mangles non-ASCII (em dashes etc.).
+$prevOutEnc = [Console]::OutputEncoding; $prevPipeEnc = $OutputEncoding
+[Console]::OutputEncoding = [Text.Encoding]::UTF8; $OutputEncoding = [Text.Encoding]::UTF8
+$notes = "$instructions`nCommits in this release ($range), separated by ----:`n`n$commits" | claude -p
+[Console]::OutputEncoding = $prevOutEnc; $OutputEncoding = $prevPipeEnc
+$notesText = (($notes -join "`n").Trim())
+# Drop any preamble before the first section heading (the format demands none,
+# but published notes must never contain model chatter).
+if ($notesText -match '(?ms)^.*?(?=^## )') { $notesText = $notesText.Substring($Matches[0].Length) }
+if ($LASTEXITCODE -eq 0 -and $notesText -match '^(## |Maintenance release)') {
+  $notesFile = Join-Path $root ".output\release-notes-$new.md"
+  [IO.File]::WriteAllText($notesFile, $notesText + "`n")
+  Write-Host ($notesText -replace '(?m)^', '    ') -ForegroundColor DarkGray
+  $notesArgs = @('--notes-file', $notesFile)
+}
+else {
+  Write-Host '    claude -p failed — falling back to GitHub auto-generated notes.' -ForegroundColor Yellow
+}
+
+Step 'Creating the GitHub release'
+$zips = Get-ChildItem (Join-Path $root '.output') -Filter '*.zip' |
   Where-Object { $_.Name -like "*$new*" } |
-  ForEach-Object { Write-Host "    $($_.FullName)" -ForegroundColor Green }
+  ForEach-Object { $_.FullName }
+# Non-fatal: the tag is pushed either way, so a gh hiccup shouldn't fail the release.
+& gh @(@('release', 'create', $tag, '--verify-tag', '--title', "Note by Note $new") + $notesArgs + $zips)
+if ($LASTEXITCODE -ne 0) {
+  Write-Host "    gh release create failed — create it manually: gh release create $tag --generate-notes .output\*$new*.zip" -ForegroundColor Yellow
+}
+
+Step "Released $tag"
+$zips | ForEach-Object { Write-Host "    $_" -ForegroundColor Green }
 Write-Host "`n    Upload the Chrome zip to the Web Store, the Firefox + sources zips to AMO." -ForegroundColor DarkGray
