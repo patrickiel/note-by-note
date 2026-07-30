@@ -1,143 +1,78 @@
 # Publishing
 
-How to get Note by Note onto the Chrome Web Store and Firefox Add-ons (AMO).
+How to ship a new version of Note by Note to the Chrome Web Store and Firefox
+Add-ons (AMO). First-time setup (accounts, listings, store assets, privacy
+forms) is done — this is the recurring path.
 
-Two builds, two stores, one source tree — [wxt.config.ts](wxt.config.ts) already
-emits both. Work top to bottom: **Step 0 is the only part with open decisions**;
-everything after it is mechanical.
-
----
-
-## Step 0 — Settle these before uploading anything
-
-| # | Decision | Why it blocks |
-| --- | --- | --- |
-| 0.1 | ~~Privacy policy URL~~ — **done** | [PRIVACY.md](PRIVACY.md). Both stores want a URL, so use `https://github.com/patrickiel/note-by-note/blob/main/PRIVACY.md` (or a GitHub Pages copy). Re-check the wording matches the shipped build before each submission. |
-| 0.2 | ~~Firefox data-collection claim~~ — **done** | `data_collection_permissions` is now `{ required: ['browsingActivity'] }` — sync uploads Recent/Favorites, which carry page URLs and titles, and it is on by default. Answer the AMO data form the same way: *browsing activity*, required, no other categories. |
-| 0.3 | ~~Version number~~ — **done** | `package.json` is `1.0.0`; WXT copies it into both manifests. Store versions can only ever go up and can't be reused, so a withdrawn or rejected `1.0.0` still burns the number — bump to `1.0.1` rather than resubmitting it. |
-| 0.4 | **Who operates the sync Worker** | [PRIVACY.md](PRIVACY.md) names the author as operator and points at `note-by-note-sync.oapp.workers.dev`. If that changes, both the policy and `SYNC_ENDPOINT` in [api.ts](src/features/sync/panel/api.ts) have to change with it. |
-| 0.5 | **GPL is fine here** | GPL-2.0-or-later is allowed on both stores. Only the Apple App Stores are off-limits (Rubber Band's own guidance) — irrelevant for browser extensions. |
-
----
-
-## Step 1 — Prepare the release build
+## 1 — Cut the release
 
 ```powershell
-pnpm install          # regenerates the worklet bundles — they are not committed
-pnpm check            # type gate, must be clean
-pnpm test:dsp
-pnpm wxt build --mode testing ; node e2e/run.mjs   # optional but recommended
+pnpm release:dry      # preview: version bump, tag, steps
+pnpm release          # check + test, bump patch, build zips, commit, tag, push
 ```
 
-Then bump the version in [package.json](package.json) (WXT copies it into both
-manifests), commit, and tag.
+Non-patch bump: `.\scripts\release.ps1 -Bump minor` (or `-Bump major`,
+`-Version x.y.z`). The script refuses on a dirty tree, off-`main`, behind
+`origin/main`, or an existing tag. Output lands in `.output/`:
 
----
+- `note-by-note-<version>-chrome.zip`
+- `note-by-note-<version>-firefox.zip` + `note-by-note-<version>-sources.zip`
 
-## Step 2 — Produce the store packages
+Optional pre-flight before releasing: `pnpm wxt build --mode testing ; node e2e/run.mjs`.
 
-```powershell
-pnpm zip              # → .output/note-by-note-<version>-chrome.zip
-pnpm zip:firefox      # → .output/note-by-note-<version>-firefox.zip
-                      #   + note-by-note-<version>-sources.zip
+Sanity-check the zips if anything about the build changed:
+
+- Both contain `worklets/rubberband-worklet.js`, `rb.wasm`,
+  `vocal-reducer-worklet.js`, `pcm-tap-worklet.js` (missing → `pnpm install` was skipped).
+- Chrome zip has `offscreen.html`; the Firefox zip must **not**.
+
+## 2 — Chrome Web Store
+
+[Developer Dashboard](https://chrome.google.com/webstore/devconsole) → the item
+→ **Package** → upload the chrome zip → submit. Chrome auto-publishes after
+review (a few days; `<all_urls>` + tab capture can stretch it).
+
+Only revisit the **Privacy practices** tab if permissions or data use changed —
+keep it consistent with the manifest's `data_collection_permissions`
+(*browsing activity*: sync uploads Recent/Favorites, which carry URLs/titles).
+
+## 3 — Firefox Add-ons (AMO)
+
+[Developer Hub](https://addons.mozilla.org/developers/) → the add-on → **Upload
+New Version** → upload the firefox zip **and the sources zip** (mandatory every
+upload — the build is bundled/minified). Notes to reviewer:
+
+```
+Node 22+, pnpm 11.
+pnpm install ; pnpm zip:firefox
+Output: .output/note-by-note-<version>-firefox.zip
+Note: pnpm install (postinstall) generates the AudioWorklet bundles under
+public/worklets/ — they are intentionally not committed.
+
+The validator's two warnings are both in third-party code:
+- chunks/ort.wasm.bundle.min-*.js "unsafe call to import" — onnxruntime-web
+  loading its own wasm glue by variable URL. It resolves to a bundled asset;
+  nothing is fetched from the network (no CDN references in the package).
+- chunks/settings.svelte-*.js "unsafe assignment to innerHTML" — the Svelte 5
+  runtime's <template> helper, on compile-time-constant markup, via its
+  "svelte-trusted-html" Trusted Types policy. Our own source contains no
+  innerHTML and no {@html}.
 ```
 
-Check before uploading:
+If the data-collection answers ever change, the manifest's
+`data_collection_permissions` and the AMO form must match — a mismatch is a
+rejection.
 
-- Both zips contain `worklets/rubberband-worklet.js`, `worklets/rb.wasm`,
-  `worklets/vocal-reducer-worklet.js`, `worklets/pcm-tap-worklet.js`. If a
-  worklet is missing, `pnpm install` was skipped.
-- The Chrome zip has `offscreen.html`; the Firefox zip must **not** (that
-  entrypoint is excluded from the Firefox build).
-- Package is ~20 MB, mostly `models/btc.onnx` and the ONNX runtime WASM. Well
-  under both stores' limits, but it makes review slower.
+## 4 — After both are live
 
----
+Cut a GitHub release on the `v<version>` tag and attach both extension zips
+(GPL source availability + sideload fallback).
 
-## Step 3 — Store assets (shared by both listings)
+## When listing content changes
 
-~~Produce these once~~ — **done**, they live in [store/](store/) and are reused
-for both listings. See [store/README.md](store/README.md) for the upload order
-and for how to regenerate them after a UI change.
-
-- **Icon** — [store/icon-128.png](store/icon-128.png) (copy of `public/icon/128.png`).
-- **Screenshots** — five `1280×800` PNGs in [store/screenshots/](store/screenshots/):
-  the panel docked beside a page, the timeline with markers and a loop range,
-  the snippet chain, the vocal reducer + EQ, and the privacy/sync settings.
-  Chrome takes at most five; AMO takes all of them.
-- **Short description** — [store/short-description.txt](store/short-description.txt),
-  the manifest line (76 of Chrome's 132 chars).
-- **Long description** — one per store, because the two fields differ in both
-  markup and substance:
-  - Chrome — [store/long-description.txt](store/long-description.txt). Plain
-    text; the field renders line breaks but not Markdown.
-  - Firefox — [store/long-description-firefox.md](store/long-description-firefox.md).
-    AMO renders a limited Markdown set (bold, italic, links, lists — **no
-    headings**). It also drops the tab-capture paragraph (Chromium-only), says
-    *sidebar* rather than *side panel*, and states Firefox 140+ instead of
-    Chrome 116+. Keep the two in sync when the copy changes.
-- **Promo tiles** (Chrome, optional) — small
-  [store/promo-tile-440x280.png](store/promo-tile-440x280.png) and large/marquee
-  [store/promo-tile-1400x560.png](store/promo-tile-1400x560.png). Neither is
-  required to submit; the marquee only matters if Chrome's editors consider the
-  listing for a featured collection.
-
----
-
-## Step 4 — Chrome Web Store
-
-1. Register at the [Developer Dashboard](https://chrome.google.com/webstore/devconsole) — **one-time $5 fee**, needs a Google account.
-2. **New item** → upload `note-by-note-<version>-chrome.zip`.
-3. Fill in the listing: description, category *Productivity*, screenshots, homepage `https://github.com/patrickiel/note-by-note`, privacy policy URL from Step 0.1.
-4. **Privacy practices** — the part reviewers actually read. Justify each permission in one line:
-   - `storage` — saves markers, loops and settings per track.
-   - `activeTab` + `scripting` — injects the audio engine into the tab you press Connect on.
-   - `tabs` — reads the active tab's URL/title to look up its saved practice data.
-   - `tabCapture` + `offscreen` — fallback processing when a page blocks the audio worklet.
-   - `optional_host_permissions: <all_urls>` — requested only on first Connect, never at install; needed because the user chooses which sites to practice on.
-   - **Remote code**: answer *No*. All WASM ships inside the package; the CSP `wasm-unsafe-eval` is for instantiating those bundled bytes, not for fetching code.
-   - **Data use**: declare *web history* for the sync feature (Recent/Favorites carry page URLs and titles) and check the three required "I do not sell / use only for the stated purpose / not for creditworthiness" boxes. Keep this consistent with the Firefox claim in Step 0.2.
-5. Submit. First review typically takes a few days; `<all_urls>` and tab capture can push it longer.
-
----
-
-## Step 5 — Firefox Add-ons (AMO)
-
-1. Create a free account at [addons.mozilla.org/developers](https://addons.mozilla.org/developers/) — no fee.
-2. **Submit a New Add-on** → *On this site* → upload `note-by-note-<version>-firefox.zip`.
-3. **Upload the sources zip too.** This is mandatory, not optional: the build is bundled and minified, so review needs the source. Include build instructions in the notes-to-reviewer:
-   ```
-   Node 22+, pnpm 11.
-   pnpm install ; pnpm zip:firefox
-   Output: .output/note-by-note-<version>-firefox.zip
-   Note: pnpm install (postinstall) generates the AudioWorklet bundles under
-   public/worklets/ — they are intentionally not committed.
-
-   The validator's two warnings are both in third-party code:
-   - chunks/ort.wasm.bundle.min-*.js "unsafe call to import" — onnxruntime-web
-     loading its own wasm glue by variable URL. It resolves to a bundled asset;
-     nothing is fetched from the network (no CDN references in the package).
-   - chunks/settings.svelte-*.js "unsafe assignment to innerHTML" — the Svelte 5
-     runtime's <template> helper, on compile-time-constant markup, via its
-     "svelte-trusted-html" Trusted Types policy. Our own source contains no
-     innerHTML and no {@html}.
-   ```
-4. Confirm the manifest's `data_collection_permissions` matches what you answer in the data-collection form (Step 0.2) — a mismatch is a rejection.
-5. Reuse the listing text and screenshots from Step 3. License: **GPL-2.0-or-later**.
-6. Submit. AMO review is usually faster than Chrome's, but the source-code review of the WASM worklets may add a round trip.
-
----
-
-## Step 6 — After both are live
-
-1. Update the README's "Installing it" section — it currently says *"There's no store listing yet"*. Replace with the two store links.
-2. Cut a GitHub release with the same tag and attach both zips (GPL source availability, and a fallback for anyone who wants to sideload).
-3. Tick **Release** off [TODO.md](TODO.md).
-
----
-
-## Updating later
-
-Bump the version, rerun Steps 1–2, upload the new zip to each store. Chrome
-auto-publishes after review; AMO signs and pushes the update. Every AMO upload
-needs a fresh sources zip. Nothing else changes.
+Store copy and screenshots live in [store/](store/) and are shared by both
+listings — see [store/README.md](store/README.md) for regeneration and upload
+order. Chrome and Firefox long descriptions differ deliberately (markup,
+sidebar vs side panel, no tab-capture paragraph on Firefox) — keep them in
+sync when editing. Privacy policy is [PRIVACY.md](PRIVACY.md); re-check its
+wording against the shipped build whenever behavior around data changes.
