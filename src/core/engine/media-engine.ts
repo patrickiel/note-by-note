@@ -79,6 +79,16 @@ export class MediaEngine {
     listen('durationchange', () => this.emitMediaInfo());
     listen('timeupdate', () => this.#emitTime(false));
 
+    // SPA navigations (YouTube) update document.title after the media element
+    // fires its events — without this the panel keys the track under the
+    // previous page's title and never hears the correction.
+    const titleEl = document.querySelector('title');
+    if (titleEl) {
+      const observer = new MutationObserver(() => this.emitMediaInfo());
+      observer.observe(titleEl, { childList: true, characterData: true, subtree: true });
+      this.#disposers.push(() => observer.disconnect());
+    }
+
     this.#syncRateFlags();
     if (!el.paused) this.#startTicking();
   }

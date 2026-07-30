@@ -227,7 +227,7 @@
     {#if history.entries.length === 0}
       <div class="flex flex-col items-center gap-2.5 px-6 py-12 text-faint text-center">
         <Icon name="history" size={28} />
-        <p class="m-0 text-[12.5px]">Songs you play are saved here automatically.</p>
+        <p class="m-0 text-[12.5px]">Songs you adjust are saved here automatically.</p>
       </div>
     {:else}
       <div class="flex-1 min-h-0 overflow-y-auto">
