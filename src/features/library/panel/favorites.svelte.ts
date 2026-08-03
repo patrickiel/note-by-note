@@ -1,9 +1,10 @@
-import type { FavoriteEntry, HistoryEntry } from '../../../core/model/types';
+import type { FavoriteEntry, HistoryEntry, TrackIdentity } from '../../../core/model/types';
 import {
   addFavorite,
   removeFavorite,
   setFavoritesOrder,
 } from '../persist/favorites';
+import { isSameTrack } from '../../../core/model/track-identity';
 import { favoritesItem } from '../../../core/persist/storage';
 
 class FavoritesStore {
@@ -16,12 +17,16 @@ class FavoritesStore {
     });
   }
 
-  has(key: string): boolean {
-    return this.entries.some((e) => e.identity.key === key);
+  /** By song, not by key: a favorite stored under a duration that has since
+   * drifted is still this track, and its star has to read as lit. */
+  has(identity: TrackIdentity): boolean {
+    return this.entries.some((e) => isSameTrack(e.identity, identity));
   }
 
   async toggle(entry: HistoryEntry) {
-    if (this.has(entry.identity.key)) await removeFavorite(entry.identity.key);
+    // Unstar the row as it was stored — its key may differ from this one's.
+    const existing = this.entries.find((e) => isSameTrack(e.identity, entry.identity));
+    if (existing) await removeFavorite(existing.identity.key);
     else await addFavorite(entry);
   }
 

@@ -233,7 +233,7 @@
       <div class="flex-1 min-h-0 overflow-y-auto">
         <div class="list flex flex-col p-2 gap-0.5">
           {#each history.entries as entry (entry.identity.key)}
-            {@const favorited = favorites.has(entry.identity.key)}
+            {@const favorited = favorites.has(entry.identity)}
             <div class="row relative flex items-center gap-0.5">
               {@render entryButton(entry, entry.updatedAt)}
               <IconButton

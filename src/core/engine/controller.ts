@@ -214,6 +214,15 @@ export class Controller {
   }
 
   #attach(el: HTMLMediaElement) {
+    // Carry the live settings across the swap. Sites replace the element mid-page
+    // (YouTube does it for pre-rolls and quality changes), and a fresh engine on
+    // DEFAULT_PARAMS would silently reset the user's pitch/speed — and broadcast
+    // that reset over whatever the panel had just applied. Whether a *new track*
+    // should start clean is the panel's call (auto reset / remember / carry over),
+    // not something an element swap gets to decide.
+    const carried = this.engine
+      ? { params: structuredClone(this.engine.params), volume: this.engine.volume }
+      : null;
     this.#detach();
     const engine = new MediaEngine(el, {
       onTime: (t, playing) => {
@@ -225,6 +234,13 @@ export class Controller {
         this.broadcast({ type: 'params', params: structuredClone(params) }),
       onVolume: (volume) => this.broadcast({ type: 'volume', volume }),
     });
+    if (carried) {
+      engine.volume = carried.volume;
+      // Through patchParams, not a field write: it syncs the element's rate and
+      // preservesPitch flags to the carried values (the chain picks them up in
+      // #attachChain) and echoes them, so the panel mirror can't drift.
+      engine.patchParams(carried.params);
+    }
     this.engine = engine;
     this.metronome = new Metronome();
     this.countIn = new CountIn(

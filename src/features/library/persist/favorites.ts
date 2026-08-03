@@ -1,11 +1,14 @@
 import type { EffectParams, HistoryEntry } from '../../../core/model/types';
+import { isSameTrack } from '../../../core/model/track-identity';
 import { favoritesItem } from '../../../core/persist/storage';
 
 /** Star a song: copy the history entry into the Favorites library (top of the
  * manual order). No-op if already favorited. */
 export async function addFavorite(entry: HistoryEntry): Promise<void> {
   const list = await favoritesItem.getValue();
-  if (list.some((e) => e.identity.key === entry.identity.key)) return;
+  // By song, not by key — starring the same track after its duration settled
+  // differently must not add a second row.
+  if (list.some((e) => isSameTrack(e.identity, entry.identity))) return;
   const now = Date.now();
   await favoritesItem.setValue([
     { ...entry, favoritedAt: now, lastAccessedAt: now },

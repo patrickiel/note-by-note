@@ -15,11 +15,22 @@ class TrackSync {
   #identity: TrackIdentity | null = null;
   #pageUrl = '';
   #thumbnailUrl: string | undefined;
-  /** Params staged by a History click, applied when that track loads. */
-  #pendingRestore: { key: string; params: EffectParams } | null = null;
+  /** Params staged by a History click, matched on the page rather than the
+   * identity key: the duration is part of the key and is still settling while
+   * the target loads (ads, late metadata), so the key can't match yet. */
+  #pendingRestore: { normalizedUrl: string; params: EffectParams } | null = null;
   #saveTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The params last set for #identity. `session.params` is overwritten by the
+   * incoming engine's snapshot before that snapshot's media event reaches us,
+   * so the outgoing track has to be saved from this, not from the mirror. */
+  #params: EffectParams | null = null;
   /** True once the user touched a control on this track — gates the Recent save. */
   #userAdjusted = false;
+  /** Key of an in-flight #apply. Every connect delivers more than one snapshot
+   * and #identity is only assigned after an awaited save, so without this two
+   * runs both take the track-switch branch and the loser applies auto-reset
+   * over the params the winner just restored. */
+  #applyingKey: string | null = null;
   #zeroDurationTimer: ReturnType<typeof setTimeout> | undefined;
 
   init() {
@@ -49,9 +60,29 @@ class TrackSync {
     await this.#apply(media);
   }
 
+  /** Applies the params a History click staged, but only once the track keys
+   * itself the way that click targeted — an intermediate identity (a pre-roll
+   * ad's duration, metadata not loaded yet) must not burn the restore. */
+  #takeRestore(normalizedUrl: string): boolean {
+    const restore = this.#pendingRestore;
+    if (!restore || restore.normalizedUrl !== normalizedUrl) return false;
+    this.#pendingRestore = null;
+    session.patchParams(restore.params);
+    // patchParams fires onParamsChanged synchronously — a restore is not an
+    // edit, so it must not re-save the entry it just came from.
+    this.#userAdjusted = false;
+    clearTimeout(this.#saveTimer);
+    return true;
+  }
+
   async #apply(media: MediaInfo) {
     const identity = makeTrackIdentity(media.pageUrl, media.title, media.duration);
+    if (identity.key === this.#applyingKey) return;
+
     if (identity.key === this.#identity?.key) {
+      // Clicking the entry for the track already open reloads the page, so the
+      // engine comes back on defaults under an unchanged key — restore here too.
+      this.#takeRestore(identity.normalizedUrl);
       // Same track — but the title may have settled late (SPA navigation).
       if (identity.title !== this.#identity.title) {
         this.#identity = identity;
@@ -65,54 +96,74 @@ class TrackSync {
     // treating it as a track switch, so Recents doesn't get a duplicate row.
     if (this.#identity && identity.normalizedUrl === this.#identity.normalizedUrl) {
       const staleKey = this.#identity.key;
+      const adjusted = this.#userAdjusted;
       this.#identity = identity;
       this.#pageUrl = media.pageUrl;
       this.#thumbnailUrl = media.thumbnailUrl ?? this.#thumbnailUrl;
-      if (this.#userAdjusted) {
+      // The key was wrong until now, so the real key's slice was never loaded.
+      const data = await loadTrackData(identity.key);
+      if (data) for (const d of trackDataDescriptors) d.load(data);
+      // The duration finally matches what a click staged — unless the user
+      // started adjusting while it settled, in which case their edit wins.
+      if (!adjusted && this.#takeRestore(identity.normalizedUrl)) return;
+      if (adjusted) {
         await removeHistoryEntry(staleKey);
         await this.#saveCurrent();
-        this.#persistTrackData();
+        // Only carry the stale key's slice over when the real key has none, so
+        // this can't overwrite a saved record with an emptied one.
+        if (!data) this.#persistTrackData();
       }
       return;
     }
 
-    // Leaving the previous track: auto-save it with its final settings.
-    await this.#saveCurrent();
+    this.#applyingKey = identity.key;
+    try {
+      // Leaving the previous track: auto-save it with its final settings.
+      await this.#saveCurrent();
 
-    this.#identity = identity;
-    this.#pageUrl = media.pageUrl;
-    this.#thumbnailUrl = media.thumbnailUrl;
+      this.#identity = identity;
+      this.#pageUrl = media.pageUrl;
+      this.#thumbnailUrl = media.thumbnailUrl;
 
-    // Restore this track's per-feature data (markers, snippets, chords) if
-    // we've seen it before — each feature scatters its own slice.
-    const data = await loadTrackData(identity.key);
-    for (const d of trackDataDescriptors) d.load(data);
+      // Restore this track's per-feature data (markers, snippets, chords) if
+      // we've seen it before — each feature scatters its own slice.
+      const data = await loadTrackData(identity.key);
+      for (const d of trackDataDescriptors) d.load(data);
 
-    // Starting params: history restore > auto reset > remember > carry over.
-    const restore = this.#pendingRestore;
-    this.#pendingRestore = null;
-    if (restore?.key === identity.key) {
-      session.patchParams(restore.params);
-    } else if (settings.current.autoReset) {
-      session.patchParams(structuredClone(DEFAULT_PARAMS));
-    } else if (settings.current.rememberSettings && settings.current.lastUsedParams) {
-      session.patchParams(structuredClone(settings.current.lastUsedParams));
+      // Starting params: history restore > auto reset > remember > carry over.
+      if (!this.#takeRestore(identity.normalizedUrl)) {
+        // A click that never landed here can't land later either — a differing
+        // normalizedUrl means a genuinely different page.
+        this.#pendingRestore = null;
+        if (settings.current.autoReset) {
+          session.patchParams(structuredClone(DEFAULT_PARAMS));
+        } else if (settings.current.rememberSettings && settings.current.lastUsedParams) {
+          // $state.snapshot, not structuredClone: settings.current is a rune, so
+          // lastUsedParams is a proxy and structuredClone throws on it.
+          session.patchParams($state.snapshot(settings.current.lastUsedParams) as EffectParams);
+        }
+        // The patches above fire onParamsChanged synchronously — reset after
+        // them so only real user edits count toward the Recent save.
+        this.#userAdjusted = false;
+        clearTimeout(this.#saveTimer);
+      }
+      this.#params = $state.snapshot(session.params) as EffectParams;
+
+      // If the track is favorited, bump its Last Accessed timestamp.
+      await touchFavorite(identity.key, {
+        pageUrl: media.pageUrl,
+        thumbnailUrl: media.thumbnailUrl,
+      });
+    } finally {
+      this.#applyingKey = null;
     }
-    // The patches above fire onParamsChanged synchronously — reset after them
-    // so only real user edits count toward the Recent save.
-    this.#userAdjusted = false;
-
-    // If the track is favorited, bump its Last Accessed timestamp.
-    await touchFavorite(identity.key, {
-      pageUrl: media.pageUrl,
-      thumbnailUrl: media.thumbnailUrl,
-    });
   }
 
   /** Called on (debounced) param changes to keep history and
    * "Remember settings" fresh without waiting for a track switch. */
   onParamsChanged() {
     this.#userAdjusted = true;
+    this.#params = $state.snapshot(session.params) as EffectParams;
     clearTimeout(this.#saveTimer);
     this.#saveTimer = setTimeout(() => {
       void this.#saveCurrent();
@@ -126,10 +177,13 @@ class TrackSync {
 
   async #saveCurrent() {
     if (!this.#identity) return;
-    const params = $state.snapshot(session.params) as EffectParams;
+    // Nothing was edited on this track — mirroring now would write auto-reset
+    // or carried-over state over what the user actually saved.
+    if (!this.#userAdjusted) return;
+    const params = this.#params ?? ($state.snapshot(session.params) as EffectParams);
     // Favorites mirror the latest settings so they recall them on open.
     await touchFavorite(this.#identity.key, { params });
-    if (!settings.current.autoSave || !this.#userAdjusted) return;
+    if (!settings.current.autoSave) return;
     await upsertHistory(this.#identity, params, this.#pageUrl, this.#thumbnailUrl);
   }
 
@@ -152,7 +206,24 @@ class TrackSync {
 
   /** History → Recent entry clicked: navigate there and stage its settings. */
   async openHistoryEntry(tabId: number | null, entry: HistoryEntry) {
-    this.#pendingRestore = { key: entry.identity.key, params: entry.params };
+    // Duration-independent, unlike identity.key: the target's duration goes on
+    // settling long after this (ads, late metadata), so the key can't match yet.
+    const normalizedUrl = makeTrackIdentity(entry.pageUrl, '', 0).normalizedUrl;
+    // Snapshot now: `entry` belongs to a $state store, so its params are a proxy
+    // (structuredClone throws DataCloneError on one) and patchParams would
+    // otherwise assign nested values — the EQ bands — straight off the entry.
+    const params = $state.snapshot(entry.params) as EffectParams;
+    this.#pendingRestore = { normalizedUrl, params };
+
+    // Already playing that page: apply in place. Re-navigating to the URL it is
+    // already on would reload for nothing (losing the playhead), and may not
+    // fire a media event at all — leaving the restore staged forever.
+    const playing = session.media?.pageUrl;
+    if (playing && makeTrackIdentity(playing, '', 0).normalizedUrl === normalizedUrl) {
+      this.#takeRestore(normalizedUrl);
+      return;
+    }
+
     if (tabId != null) {
       await browser.tabs.update(tabId, { url: entry.pageUrl });
     } else {
