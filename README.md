@@ -2,6 +2,15 @@
 <h1 align="center">Note by Note</h1>
 
 <p align="center">
+  <a href="https://chromewebstore.google.com/detail/bifddjdeacijlelkenjkfcmlbicgoglc">
+    <img src="https://img.shields.io/badge/Chrome%20Web%20Store-Install-4285F4?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Install Note by Note from the Chrome Web Store">
+  </a>
+  <a href="https://addons.mozilla.org/en-US/firefox/addon/note-by-note/">
+    <img src="https://img.shields.io/badge/Firefox%20Add--ons-Install-FF7139?style=for-the-badge&logo=firefoxbrowser&logoColor=white" alt="Install Note by Note from Firefox Add-ons">
+  </a>
+</p>
+
+<p align="center">
   <img src="store/screenshots/1-overview.png" alt="The Note by Note side panel: transpose, pitch and speed controls, vocal reducer and 10-band EQ, a looper timeline with markers, chained snippets, and a detected chord chart" width="100%">
 </p>
 
@@ -12,7 +21,8 @@ into your instrument's key, slow a solo to half speed without the chipmunk
 effect, and loop four bars until they stick.
 
 
-Chrome 116+ (MV3, side panel). Built with [WXT](https://wxt.dev), Svelte 5 and
+Chrome 116+ and Firefox 140+ (MV3, side panel). Built with
+[WXT](https://wxt.dev), Svelte 5 and
 TypeScript; pitch and time-stretching come from the
 [Rubber Band Library](https://breakfastquay.com/rubberband/) realtime R3 engine,
 compiled to a WASM AudioWorklet.
@@ -45,14 +55,39 @@ to a small Cloudflare Worker.
 
 ## Installing it
 
-There's no store listing yet, so it's load-unpacked for now:
+<table>
+  <tr>
+    <td width="72" align="center">
+      <a href="https://chromewebstore.google.com/detail/bifddjdeacijlelkenjkfcmlbicgoglc">
+        <img src="https://cdn.simpleicons.org/googlechrome/4285F4" width="48" height="48" alt="Chrome Web Store">
+      </a>
+    </td>
+    <td>
+      <b>Chrome, Edge, Brave</b><br>
+      <a href="https://chromewebstore.google.com/detail/bifddjdeacijlelkenjkfcmlbicgoglc">Install from the Chrome Web Store</a>
+    </td>
+  </tr>
+  <tr>
+    <td width="72" align="center">
+      <a href="https://addons.mozilla.org/en-US/firefox/addon/note-by-note/">
+        <img src="https://cdn.simpleicons.org/firefoxbrowser/FF7139" width="48" height="48" alt="Firefox Add-ons">
+      </a>
+    </td>
+    <td>
+      <b>Firefox</b><br>
+      <a href="https://addons.mozilla.org/en-US/firefox/addon/note-by-note/">Install from Firefox Add-ons</a>
+    </td>
+  </tr>
+</table>
+
+Or build it yourself and load it unpacked:
 
 ```powershell
 pnpm install ; pnpm build
 ```
 
 Then open `chrome://extensions`, turn on **Developer mode**, choose **Load
-unpacked**, and pick `.output/chrome-mv3`. Chrome 116+.
+unpacked**, and pick `.output/chrome-mv3`.
 
 ## Running it locally
 
