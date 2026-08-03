@@ -1,0 +1,60 @@
+{
+  "version": "2.0.0",
+  "presentation": {
+    "reveal": "never",
+    "close": true,
+    "panel": "shared"
+  },
+  "tasks": [
+    {
+      "label": "Repo",
+      "type": "shell",
+      "command": "Start-Process 'https://github.com/patrickiel/note-by-note'",
+      "icon": {
+        "id": "github",
+        "color": "terminal.ansiWhite"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Issues",
+      "type": "shell",
+      "command": "Start-Process 'https://github.com/patrickiel/note-by-note/issues'",
+      "icon": {
+        "id": "issues",
+        "color": "terminal.ansiGreen"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Board",
+      "type": "shell",
+      "command": "Start-Process 'https://github.com/users/patrickiel/projects/14'",
+      "icon": {
+        "id": "project",
+        "color": "terminal.ansiMagenta"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Chrome",
+      "type": "shell",
+      "command": "Start-Process 'https://chrome.google.com/webstore/devconsole/8aca9ff7-1f23-42ee-8f1d-7ce3945385a1/bifddjdeacijlelkenjkfcmlbicgoglc/edit/package'",
+      "icon": {
+        "id": "browser",
+        "color": "terminal.ansiBlue"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Firefox",
+      "type": "shell",
+      "command": "Start-Process 'https://addons.mozilla.org/en-US/developers/addon/note-by-note/versions'",
+      "icon": {
+        "id": "flame",
+        "color": "terminal.ansiYellow"
+      },
+      "problemMatcher": []
+    }
+  ]
+}
