@@ -38,7 +38,8 @@ EQ with saveable presets.
 draws a chart under the timeline.
 
 **Keeping your place.** Settings are stored per track against a normalized URL,
-so reopening a video brings back its markers, loops and snippets. Favorites and
+so reopening a video brings back its pitch, speed, markers, loops and snippets —
+however you open it, not just from the library. Favorites and
 recents live in a library tab, and optional cross-device sync pushes a snapshot
 to a small Cloudflare Worker.
 

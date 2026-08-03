@@ -3,16 +3,23 @@ import type { EffectParams, HistoryEntry, TrackIdentity } from '../../../core/mo
 import { isSameTrack } from '../../../core/model/track-identity';
 import { historyItem } from '../../../core/persist/storage';
 
-/** Insert or refresh a Recent entry (newest first, LRU-capped). */
+/** Insert or refresh a Recent entry (newest first, LRU-capped).
+ *
+ * `onlyExisting` refreshes a row that is already there but never adds one —
+ * what Auto Save off means, since that toggle is about *adding* every song you
+ * play. Keeping the row current either way is what stops the Recent copy from
+ * drifting away from the Favorites copy of the same song. */
 export async function upsertHistory(
   identity: TrackIdentity,
   params: EffectParams,
   pageUrl: string,
   thumbnailUrl?: string,
+  onlyExisting = false,
 ): Promise<void> {
   const list = await historyItem.getValue();
   const now = Date.now();
   const existing = list.find((e) => isSameTrack(e.identity, identity));
+  if (!existing && onlyExisting) return;
   const entry = {
     identity,
     params,

@@ -3,6 +3,7 @@ import { makeTrackIdentity } from '../model/track-identity';
 import type { EffectParams, HistoryEntry, MediaInfo, TrackData, TrackIdentity } from '../model/types';
 import { touchFavorite } from '../../features/library/persist/favorites';
 import { removeHistoryEntry, upsertHistory } from '../../features/library/persist/history';
+import { findSavedEntry } from '../../features/library/panel/saved-settings';
 import { loadTrackData, saveTrackData } from '../persist/storage';
 import { trackDataDescriptors } from '../persist/track-data';
 import { session } from './session.svelte';
@@ -15,10 +16,6 @@ class TrackSync {
   #identity: TrackIdentity | null = null;
   #pageUrl = '';
   #thumbnailUrl: string | undefined;
-  /** Params staged by a History click, matched on the page rather than the
-   * identity key: the duration is part of the key and is still settling while
-   * the target loads (ads, late metadata), so the key can't match yet. */
-  #pendingRestore: { normalizedUrl: string; params: EffectParams } | null = null;
   #saveTimer: ReturnType<typeof setTimeout> | undefined;
   /** The params last set for #identity. `session.params` is overwritten by the
    * incoming engine's snapshot before that snapshot's media event reaches us,
@@ -31,6 +28,11 @@ class TrackSync {
    * runs both take the track-switch branch and the loser applies auto-reset
    * over the params the winner just restored. */
   #applyingKey: string | null = null;
+  /** The song whose saved settings are currently applied, as `url\ntitle`. Set
+   * only on a successful restore, so a lookup that missed — the title had not
+   * settled yet — is retried on the next media event. Deliberately excludes the
+   * duration: drifting duration is what it has to survive. */
+  #restoredFor: string | null = null;
   #zeroDurationTimer: ReturnType<typeof setTimeout> | undefined;
 
   init() {
@@ -42,6 +44,17 @@ class TrackSync {
         void this.#saveCurrent();
       });
     }
+  }
+
+  /** The engine link dropped — reload, reopened tab, tab switch. Whatever
+   * reconnects starts on the default preset, so this song has to be restored
+   * again; flush any live edits first so the restore reads them back. */
+  onEngineLost() {
+    // #saveCurrent reads #userAdjusted and #params before its first await, so
+    // clearing the flag on the next line can't race it.
+    void this.#saveCurrent();
+    this.#userAdjusted = false;
+    this.#restoredFor = null;
   }
 
   /** Called for every media info event from the engine. */
@@ -60,19 +73,30 @@ class TrackSync {
     await this.#apply(media);
   }
 
-  /** Applies the params a History click staged, but only once the track keys
-   * itself the way that click targeted — an intermediate identity (a pre-roll
-   * ad's duration, metadata not loaded yet) must not burn the restore. */
-  #takeRestore(normalizedUrl: string): boolean {
-    const restore = this.#pendingRestore;
-    if (!restore || restore.normalizedUrl !== normalizedUrl) return false;
-    this.#pendingRestore = null;
-    session.patchParams(restore.params);
-    // patchParams fires onParamsChanged synchronously — a restore is not an
-    // edit, so it must not re-save the entry it just came from.
+  /** Puts a song's saved settings back on, however it was opened — a clicked
+   * row, a typed URL, a link, an SPA navigation, a reload. Recent and Favorites
+   * hand a song back the way it was left; the "new song" preference governs only
+   * songs with nothing saved. */
+  #restoreSaved(identity: TrackIdentity): boolean {
+    const token = `${identity.normalizedUrl}\n${identity.title}`;
+    if (this.#restoredFor === token) return false;
+    const entry = findSavedEntry(identity);
+    if (!entry) return false;
+    this.#restoredFor = token;
+    // $state.snapshot, not structuredClone: the entry belongs to a $state store,
+    // so its params are a proxy (structuredClone throws DataCloneError on one)
+    // and patchParams would otherwise assign its EQ band array by reference.
+    this.#applyParams($state.snapshot(entry.params) as EffectParams);
+    return true;
+  }
+
+  /** Sets params on the track's behalf rather than the user's. patchParams fires
+   * onParamsChanged synchronously, so without this every restore and every auto
+   * reset would count as an edit and re-save the entry it just read. */
+  #applyParams(params: EffectParams) {
+    session.patchParams(params);
     this.#userAdjusted = false;
     clearTimeout(this.#saveTimer);
-    return true;
   }
 
   async #apply(media: MediaInfo) {
@@ -80,14 +104,14 @@ class TrackSync {
     if (identity.key === this.#applyingKey) return;
 
     if (identity.key === this.#identity?.key) {
-      // Clicking the entry for the track already open reloads the page, so the
-      // engine comes back on defaults under an unchanged key — restore here too.
-      this.#takeRestore(identity.normalizedUrl);
       // Same track — but the title may have settled late (SPA navigation).
       if (identity.title !== this.#identity.title) {
         this.#identity = identity;
         if (this.#userAdjusted) await this.#saveCurrent();
       }
+      // A no-op unless something changed what this song is or what is applied to
+      // it: the title just settled, or the engine restarted on the defaults.
+      if (!this.#userAdjusted) this.#restoreSaved(identity);
       return;
     }
 
@@ -103,9 +127,9 @@ class TrackSync {
       // The key was wrong until now, so the real key's slice was never loaded.
       const data = await loadTrackData(identity.key);
       if (data) for (const d of trackDataDescriptors) d.load(data);
-      // The duration finally matches what a click staged — unless the user
-      // started adjusting while it settled, in which case their edit wins.
-      if (!adjusted && this.#takeRestore(identity.normalizedUrl)) return;
+      // Their edits outrank anything stored; otherwise a lookup that missed on
+      // the stale identity gets another go now the duration has settled.
+      if (!adjusted) this.#restoreSaved(identity);
       if (adjusted) {
         await removeHistoryEntry(staleKey);
         await this.#saveCurrent();
@@ -130,27 +154,27 @@ class TrackSync {
       const data = await loadTrackData(identity.key);
       for (const d of trackDataDescriptors) d.load(data);
 
-      // Starting params: history restore > auto reset > remember > carry over.
-      if (!this.#takeRestore(identity.normalizedUrl)) {
-        // A click that never landed here can't land later either — a differing
-        // normalizedUrl means a genuinely different page.
-        this.#pendingRestore = null;
+      // A different song, so nothing is applied for it yet — even if we happen
+      // to be coming back to one restored earlier. Reset after both awaits, so
+      // this branch is the last writer and an event that slipped through during
+      // them can't restore only to be auto-reset over.
+      this.#restoredFor = null;
+      this.#userAdjusted = false;
+      // Starting params: the song's own saved settings > auto reset > remember
+      // > carry over. The last three are for songs with nothing saved.
+      if (!this.#restoreSaved(identity)) {
         if (settings.current.autoReset) {
-          session.patchParams(structuredClone(DEFAULT_PARAMS));
+          this.#applyParams(structuredClone(DEFAULT_PARAMS));
         } else if (settings.current.rememberSettings && settings.current.lastUsedParams) {
           // $state.snapshot, not structuredClone: settings.current is a rune, so
           // lastUsedParams is a proxy and structuredClone throws on it.
-          session.patchParams($state.snapshot(settings.current.lastUsedParams) as EffectParams);
+          this.#applyParams($state.snapshot(settings.current.lastUsedParams) as EffectParams);
         }
-        // The patches above fire onParamsChanged synchronously — reset after
-        // them so only real user edits count toward the Recent save.
-        this.#userAdjusted = false;
-        clearTimeout(this.#saveTimer);
       }
       this.#params = $state.snapshot(session.params) as EffectParams;
 
       // If the track is favorited, bump its Last Accessed timestamp.
-      await touchFavorite(identity.key, {
+      await touchFavorite(identity, {
         pageUrl: media.pageUrl,
         thumbnailUrl: media.thumbnailUrl,
       });
@@ -181,10 +205,17 @@ class TrackSync {
     // or carried-over state over what the user actually saved.
     if (!this.#userAdjusted) return;
     const params = this.#params ?? ($state.snapshot(session.params) as EffectParams);
-    // Favorites mirror the latest settings so they recall them on open.
-    await touchFavorite(this.#identity.key, { params });
-    if (!settings.current.autoSave) return;
-    await upsertHistory(this.#identity, params, this.#pageUrl, this.#thumbnailUrl);
+    // Both copies, from one value, in one call: a song that is favorited *and*
+    // in Recent must never end up with the two disagreeing. Auto Save off stops
+    // new rows being added, not an existing one being kept current.
+    await touchFavorite(this.#identity, { params });
+    await upsertHistory(
+      this.#identity,
+      params,
+      this.#pageUrl,
+      this.#thumbnailUrl,
+      !settings.current.autoSave,
+    );
   }
 
   #persistTrackData() {
@@ -204,23 +235,18 @@ class TrackSync {
     void saveTrackData(data);
   }
 
-  /** History → Recent entry clicked: navigate there and stage its settings. */
+  /** A row in the Songs list was clicked: go there. Its settings need no staging
+   * — arriving at a song is what puts them back on, whoever asked for it. */
   async openHistoryEntry(tabId: number | null, entry: HistoryEntry) {
-    // Duration-independent, unlike identity.key: the target's duration goes on
-    // settling long after this (ads, late metadata), so the key can't match yet.
-    const normalizedUrl = makeTrackIdentity(entry.pageUrl, '', 0).normalizedUrl;
-    // Snapshot now: `entry` belongs to a $state store, so its params are a proxy
-    // (structuredClone throws DataCloneError on one) and patchParams would
-    // otherwise assign nested values — the EQ bands — straight off the entry.
-    const params = $state.snapshot(entry.params) as EffectParams;
-    this.#pendingRestore = { normalizedUrl, params };
-
-    // Already playing that page: apply in place. Re-navigating to the URL it is
-    // already on would reload for nothing (losing the playhead), and may not
-    // fire a media event at all — leaving the restore staged forever.
+    const target = makeTrackIdentity(entry.pageUrl, '', 0).normalizedUrl;
     const playing = session.media?.pageUrl;
-    if (playing && makeTrackIdentity(playing, '', 0).normalizedUrl === normalizedUrl) {
-      this.#takeRestore(normalizedUrl);
+    // Already on that page: apply in place. Re-navigating to the URL it is
+    // already on would reload for nothing (losing the playhead), and may not
+    // fire a media event at all.
+    if (playing && makeTrackIdentity(playing, '', 0).normalizedUrl === target) {
+      // Snapshot: `entry` belongs to a $state store, so patchParams would
+      // otherwise assign its EQ band array straight off the entry.
+      this.#applyParams($state.snapshot(entry.params) as EffectParams);
       return;
     }
 
