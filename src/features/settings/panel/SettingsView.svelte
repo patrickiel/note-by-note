@@ -396,7 +396,7 @@
       <div class="flex flex-col items-start gap-2 py-2.5 px-3 border-t border-line">
         {@render prefText(
           'When you open a new song',
-          'What happens to transpose, pitch and speed: start from the defaults, keep what is set right now, or reuse the settings from your last song. Songs you reopen from History always come back with their own saved settings.',
+          'What happens to transpose, pitch and speed on a song with nothing saved yet: start from the defaults, keep what is set right now, or reuse the settings from your last song. Songs in Recent or Favorites always come back with their own settings, however you open them.',
         )}
         <SegmentedControl
           options={newSongOptions}

@@ -40,7 +40,11 @@ class SettingsStore {
     this.onChange?.(next);
     this.#writing = true;
     try {
-      await settingsItem.setValue(next);
+      // $state.snapshot, like UiPrefsStore below: `next` is spread off the
+      // `current` rune, so nested `keymap`/`lastUsedParams` are still proxies.
+      // Firefox structured-clones storage writes and throws DataCloneError on a
+      // proxy — settings would apply for the session but never persist.
+      await settingsItem.setValue($state.snapshot(next) as Settings);
     } finally {
       this.#writing = false;
     }
@@ -49,7 +53,7 @@ class SettingsStore {
   async reset() {
     this.current = { ...DEFAULT_SETTINGS };
     this.onChange?.(this.current);
-    await settingsItem.setValue(this.current);
+    await settingsItem.setValue($state.snapshot(this.current) as Settings);
   }
 }
 

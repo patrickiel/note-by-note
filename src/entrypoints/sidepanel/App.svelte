@@ -29,6 +29,7 @@
         });
       };
       session.onUserParamsChange = () => trackSync.onParamsChanged();
+      session.onEngineDetached = () => trackSync.onEngineLost();
       // Diagnostics for the E2E harness; kept out of release builds.
       if (import.meta.env.DEV || import.meta.env.MODE === 'testing') {
         (globalThis as Record<string, unknown>).__panelDebug = {

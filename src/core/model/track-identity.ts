@@ -48,6 +48,14 @@ function hash(text: string): string {
   return (h >>> 0).toString(16);
 }
 
+/** Whether two library rows describe the same song. Deliberately not a `key`
+ * comparison: the duration baked into `key` drifts (pre-roll ads, metadata that
+ * settles late), which would split one song across several Recent rows. The
+ * title is what keeps local files apart — they all share the local-player URL. */
+export function isSameTrack(a: TrackIdentity, b: TrackIdentity): boolean {
+  return a.normalizedUrl === b.normalizedUrl && a.title === b.title;
+}
+
 export function makeTrackIdentity(
   pageUrl: string,
   title: string,

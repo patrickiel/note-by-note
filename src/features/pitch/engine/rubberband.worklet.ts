@@ -294,8 +294,14 @@ class RubberBandProcessor extends AudioWorkletProcessor {
     heap.set(inR, this.#inCh[1] >> 2);
     mod._rubberband_process(this.#state, this.#inPtr, BLOCK, false);
 
-    while (mod._rubberband_available(this.#state) > 0) {
-      const got = mod._rubberband_retrieve(this.#state, this.#outPtr, BLOCK);
+    // Retrieve only what's there: R3's output is hop-aligned, so the last pass
+    // almost always holds a partial block, and asking for BLOCK anyway makes
+    // Rubber Band log a short-read warning to stderr — i.e. a console.error per
+    // render quantum, from the audio thread. Never exceeds BLOCK, so #outPtr
+    // stays big enough.
+    let avail: number;
+    while ((avail = mod._rubberband_available(this.#state)) > 0) {
+      const got = mod._rubberband_retrieve(this.#state, this.#outPtr, Math.min(avail, BLOCK));
       if (got <= 0) break;
       heap = mod.HEAPF32;
       const ol = this.#outCh[0] >> 2;
