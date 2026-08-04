@@ -1,10 +1,10 @@
-import { DEFAULT_SETTINGS, DEFAULT_UI_PREFS } from '../../../core/model/defaults';
+import { DEFAULT_KEYMAP, DEFAULT_SETTINGS, DEFAULT_UI_PREFS } from '../../../core/model/defaults';
 import type { PanelId, SectionId, Settings, UiPrefs } from '../../../core/model/types';
 import { settingsItem, uiPrefsItem } from '../../../core/persist/storage';
 
 /** Settings synced two-way with storage.local. Components mutate via `update`. */
 class SettingsStore {
-  current = $state<Settings>({ ...DEFAULT_SETTINGS });
+  current = $state<Settings>(structuredClone(DEFAULT_SETTINGS));
   loaded = $state(false);
   #writing = false;
 
@@ -17,7 +17,15 @@ class SettingsStore {
    * a missing key never reaches the engine as `undefined` (which the port drops,
    * e.g. a NaN count-in duration that never elapses). */
   #withDefaults(value: Settings | null): Settings {
-    return { ...DEFAULT_SETTINGS, ...value };
+    return {
+      ...structuredClone(DEFAULT_SETTINGS),
+      ...value,
+      // Merged one level deeper: a keymap stored before an action existed would
+      // otherwise leave that action `undefined`, which the dispatcher can never
+      // match (the hotkey silently does nothing) and the Help sheet — which
+      // reads the keymap unconditionally — renders as a blank row.
+      keymap: { ...DEFAULT_KEYMAP, ...value?.keymap },
+    };
   }
 
   async init() {
@@ -51,7 +59,7 @@ class SettingsStore {
   }
 
   async reset() {
-    this.current = { ...DEFAULT_SETTINGS };
+    this.current = structuredClone(DEFAULT_SETTINGS);
     this.onChange?.(this.current);
     await settingsItem.setValue($state.snapshot(this.current) as Settings);
   }
@@ -95,6 +103,11 @@ class UiPrefsStore {
 
   setMarkerView(view: UiPrefs['markerView']) {
     this.current.markerView = view;
+    void this.#save();
+  }
+
+  setTimelineFollow(on: boolean) {
+    this.current.timelineFollow = on;
     void this.#save();
   }
 

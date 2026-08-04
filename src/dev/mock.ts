@@ -100,3 +100,19 @@ export function installMockState() {
     computedAt: Date.now(),
   });
 }
+
+/** Opt-in playhead motion for previewing anything time-driven (timeline
+ * auto-follow, the chord strip) without an engine. Kept out of
+ * `installMockState` on purpose: the E2E export and the store screenshot tools
+ * render that state and have to stay deterministic. */
+export function installMockTicker() {
+  const STEP_MS = 33;
+  session.playing = true;
+  setInterval(() => {
+    const loop = session.loop.mode;
+    const from = loop?.kind === 'range' ? loop.startT : 0;
+    const to = loop?.kind === 'range' ? loop.endT : session.duration;
+    const next = session.t + (STEP_MS / 1000) * session.params.speed;
+    session.t = next >= to ? from : next;
+  }, STEP_MS);
+}

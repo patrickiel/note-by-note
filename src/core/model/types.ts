@@ -237,6 +237,10 @@ export type ActionId =
   | 'toggleLoop'
   | 'rangeSelect'
   | 'addSnippet'
+  | 'zoomIn'
+  | 'zoomOut'
+  | 'zoomFit'
+  | 'toggleFollow'
   | 'power';
 
 /** User preferences. Persisted in storage.local. */
@@ -283,6 +287,9 @@ export interface UiPrefs {
   collapsed: Record<PanelId, boolean>;
   collapsedSections: Record<SectionId, boolean>;
   markerView: MarkerView;
+  /** Page the zoomed timeline forward when the playhead leaves the visible
+   * window. Inert at full-track view, where the playhead is always on screen. */
+  timelineFollow: boolean;
   favoritesSort: FavoritesSort;
   libraryTab: 'recent' | 'favorites';
   /** Accent hue in HSL degrees (0–360), driving the themed accent colors. */

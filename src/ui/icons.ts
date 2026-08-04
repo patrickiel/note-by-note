@@ -30,6 +30,7 @@ import LayoutGrid from '@lucide/svelte/icons/layout-grid';
 import List from '@lucide/svelte/icons/list';
 import ListMusic from '@lucide/svelte/icons/list-music';
 import ListX from '@lucide/svelte/icons/list-x';
+import LocateFixed from '@lucide/svelte/icons/locate-fixed';
 import MessageCircleQuestionMark from '@lucide/svelte/icons/message-circle-question-mark';
 import Minus from '@lucide/svelte/icons/minus';
 import Moon from '@lucide/svelte/icons/moon';
@@ -59,6 +60,8 @@ import Upload from '@lucide/svelte/icons/upload';
 import Volume2 from '@lucide/svelte/icons/volume-2';
 import VolumeX from '@lucide/svelte/icons/volume-x';
 import X from '@lucide/svelte/icons/x';
+import ZoomIn from '@lucide/svelte/icons/zoom-in';
+import ZoomOut from '@lucide/svelte/icons/zoom-out';
 
 export const ICONS = {
   // Header / global
@@ -90,6 +93,9 @@ export const ICONS = {
   loop: Repeat,
   repeatSong: Repeat1,
   clock: Clock,
+  zoomOut: ZoomOut,
+  zoomIn: ZoomIn,
+  follow: LocateFixed,
   pencil: Pencil,
   viewList: List,
   viewBlocks: LayoutGrid,

@@ -61,6 +61,12 @@ export const DEFAULT_KEYMAP: Record<ActionId, string> = {
   toggleLoop: 'l',
   rangeSelect: 'r',
   addSnippet: 'c',
+  // The obvious zoom keys are unavailable: -/= are speed, and Ctrl +/- is the
+  // browser's own page zoom inside the side panel.
+  zoomIn: 'z',
+  zoomOut: 'Shift+z',
+  zoomFit: '0',
+  toggleFollow: 'f',
   power: 'p',
 };
 
@@ -81,6 +87,10 @@ export const ACTION_LABELS: Record<ActionId, string> = {
   toggleLoop: 'Toggle loop',
   rangeSelect: 'Loop current section',
   addSnippet: 'Add snippet',
+  zoomIn: 'Zoom in',
+  zoomOut: 'Zoom out',
+  zoomFit: 'Zoom to fit / loop',
+  toggleFollow: 'Auto-follow playhead',
   power: 'Power',
 };
 
@@ -160,6 +170,9 @@ export const DEFAULT_UI_PREFS: UiPrefs = {
     snippets: false,
   },
   markerView: 'blocks',
+  // On by default: follow does nothing until you zoom in, so this only means
+  // the first zoom during playback doesn't lose the playhead off the edge.
+  timelineFollow: true,
   favoritesSort: 'lastAccessed',
   libraryTab: 'recent',
   accentHue: 200,
