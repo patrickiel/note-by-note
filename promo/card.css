@@ -1,0 +1,129 @@
+/*
+  Shared skin for the screencast's bookend cards (intro.html, outro.html).
+
+  Palette, hairline grid and loop-range motif are lifted from
+  store/tools/store-promo.html, so the video and the store listing read as the
+  same piece of design.
+
+  Every entrance is a plain CSS animation with `both` fill, because
+  capture-card.mjs scrubs them: it pauses every animation on the document and
+  steps currentTime one frame at a time. So the timeline here IS the video
+  timeline — no JS, no rAF, nothing that depends on wall-clock time. Cards set
+  their own animation-name/-delay per element; the shared defaults below just
+  fix the duration and easing.
+*/
+:root {
+  --text: #f0e9db;
+  --muted: #a79d8a;
+  --faint: #6e6656;
+  --accent: #e5a83e;
+  --accent-ink: #f3c577;
+  --font: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'SF Mono', 'Roboto Mono', ui-monospace, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: #000; }
+
+/* 1007x755 is the capture viewport; at deviceScaleFactor 2 that is the
+   screencast's native 2014x1510. */
+.card {
+  position: relative;
+  width: 1007px;
+  height: 755px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-family: var(--font);
+  background:
+    radial-gradient(760px 620px at 50% 34%, rgba(229, 168, 62, 0.20), transparent 66%),
+    radial-gradient(620px 520px at 96% 108%, rgba(229, 168, 62, 0.09), transparent 62%),
+    linear-gradient(155deg, #211c15 0%, #14110c 60%, #0e0c09 100%);
+}
+/* Faint hairline grid, faded out toward the edges — same motif as the tile. */
+.card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(238, 228, 208, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(238, 228, 208, 0.035) 1px, transparent 1px);
+  background-size: 74px 74px;
+  mask-image: radial-gradient(640px 540px at 50% 42%, #000 0%, transparent 76%);
+}
+.card > * { position: relative; }
+
+/* currentColor on the icon paths, so the accent lives in one place. */
+.glyph { display: block; color: var(--accent); }
+
+h1 {
+  margin: 0;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1;
+  color: var(--text);
+  white-space: nowrap;
+}
+/* Matches HeaderBar.svelte: only "by" takes the accent ink. */
+h1 em { font-style: normal; color: var(--accent-ink); }
+
+p {
+  margin: 0;
+  line-height: 1.38;
+  color: var(--muted);
+}
+
+.caption {
+  font-family: var(--mono);
+  font-size: 17px;
+  letter-spacing: 0.14em;
+  color: var(--faint);
+}
+
+/* Loop-range accent: the product's own visual idea, in one line. */
+.lane {
+  width: 430px;
+  height: 10px;
+  border-radius: 999px;
+  background: #3a332a;
+}
+.lane span {
+  position: absolute;
+  left: 30%;
+  width: 34%;
+  top: -4px;
+  bottom: -4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), rgba(229, 168, 62, 0.6));
+  box-shadow: 0 0 0 1.5px rgba(243, 197, 119, 0.45), 0 8px 28px rgba(229, 168, 62, 0.25);
+}
+
+/* ── Entrances ──────────────────────────────────────────────
+   Staggered, all short, all easing out: a card should feel like it settles
+   rather than performs. */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes lift {
+  from { opacity: 0; transform: translateY(18px) scale(0.94); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes sweep {
+  from { transform: scaleX(0); opacity: 0.4; }
+  to   { transform: scaleX(1); opacity: 1; }
+}
+@keyframes appear {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+/* Applied to everything on a card: elements without an animation-name simply
+   ignore it, and this way a nested bit like .lane span still inherits the
+   `both` fill the capture relies on. */
+.card * {
+  animation-duration: 0.55s;
+  animation-timing-function: cubic-bezier(0.22, 0.8, 0.28, 1);
+  animation-fill-mode: both;
+}

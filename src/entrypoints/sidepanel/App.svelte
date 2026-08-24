@@ -6,7 +6,7 @@
   import SettingsView from '@/features/settings/panel/SettingsView.svelte';
   import TooltipLayer from '@/ui/shared/TooltipLayer.svelte';
   import { sendMessage } from '@/core/messaging/rpc';
-  import { installMockState } from '@/dev/mock';
+  import { installMockState, installMockTicker } from '@/dev/mock';
   import { connection } from '@/core/state/connect.svelte';
   import { CAN_CAPTURE_TAB } from '@/core/platform';
   import { features } from '@/core/features';
@@ -17,7 +17,10 @@
   import { view } from '@/core/state/view.svelte';
   import { sync } from '@/features/sync/panel/sync.svelte';
 
-  const mock = new URLSearchParams(location.search).has('mock');
+  const params = new URLSearchParams(location.search);
+  const mock = params.has('mock');
+  // ?mock=1&play=1 also runs the playhead, for previewing time-driven UI.
+  const mockPlay = mock && params.has('play');
   // Each panel feature loads its own storage concurrently (see core/features.ts).
   const ready = Promise.all(features.map((f) => f.init?.())).then(
     async () => {
@@ -42,8 +45,10 @@
       installShortcuts();
       // Fire-and-forget: opening the panel must not wait on the network.
       void sync.init();
-      if (mock) installMockState();
-      else await connection.init();
+      if (mock) {
+        installMockState();
+        if (mockPlay) installMockTicker();
+      } else await connection.init();
     },
   );
 

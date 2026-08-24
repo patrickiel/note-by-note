@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Note by Note — screencast outro card</title>
+<!--
+  The closing card capture-card.mjs renders to frames and apply-cards.ps1
+  appends to the screencast. Same skin as intro.html (card.css); the job here is
+  a single clear line about where to get it, held long enough to read.
+-->
+<link rel="stylesheet" href="card.css">
+<style>
+  .glyph { width: 96px; height: 96px; }
+  h1     { margin-top: 28px; font-size: 62px; }
+  p      { margin-top: 26px; font-size: 40px; color: var(--text); }
+
+  /* Two stores, one row. Pills rather than plain text so the line reads as
+     "go here", not as another tagline. */
+  .stores {
+    margin-top: 40px;
+    display: flex;
+    gap: 18px;
+  }
+  .stores b {
+    padding: 14px 26px;
+    border: 1.5px solid rgba(243, 197, 119, 0.38);
+    border-radius: 999px;
+    font-size: 25px;
+    font-weight: 600;
+    color: var(--accent-ink);
+    background: rgba(229, 168, 62, 0.07);
+    box-shadow: 0 8px 28px rgba(229, 168, 62, 0.12);
+  }
+  .caption { margin-top: 40px; }
+
+  /* Same reading-order stagger as the intro, so the two cards feel like a
+     matched pair; the pills come in one after the other. */
+  .glyph      { animation-name: lift;   animation-delay: 0.00s; }
+  h1          { animation-name: rise;   animation-delay: 0.12s; }
+  p           { animation-name: rise;   animation-delay: 0.26s; }
+  .stores b   { animation-name: rise; }
+  .stores b:first-child { animation-delay: 0.40s; }
+  .stores b:last-child  { animation-delay: 0.52s; }
+  .caption    { animation-name: appear; animation-delay: 0.68s; }
+</style>
+</head>
+<body>
+<div class="card" role="img" aria-label="Note by Note — free for Chrome and Firefox">
+  <svg class="glyph" viewBox="4 4 17 17" aria-hidden="true">
+    <circle cx="9.5" cy="17.5" r="3.5" fill="currentColor"/>
+    <path d="M11.5 4 L13 4 L19 6 L19 9.5 L13 7.5 L13 17.5 L11.5 17.5 Z" fill="currentColor"/>
+  </svg>
+
+  <h1>Note <em>by</em> Note</h1>
+  <p>Free for your browser</p>
+  <div class="stores"><b>Chrome Web Store</b><b>Firefox Add-ons</b></div>
+  <div class="caption">SEARCH &ldquo;NOTE BY NOTE&rdquo;</div>
+</div>
+</body>
+</html>

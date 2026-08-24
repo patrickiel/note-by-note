@@ -1,0 +1,53 @@
+1
+00:00:00,300 --> 00:00:04,000
+Practice any music in your browser
+
+2
+00:00:04,300 --> 00:00:09,500
+Transpose, pitch and speed
+all live, all independent
+
+3
+00:00:09,800 --> 00:00:15,500
+Nudge the pitch in cents.
+The tempo never moves.
+
+4
+00:00:15,800 --> 00:00:22,500
+Drag the speed anywhere.
+
+5
+00:00:27,600 --> 00:00:33,000
+Isolate the vocal
+
+6
+00:00:33,300 --> 00:00:38,500
+Or push it down and play over the band
+
+7
+00:00:38,800 --> 00:00:46,500
+10-band EQ with instrument presets
+
+8
+00:00:47,500 --> 00:00:54,000
+Drop a marker on every section
+
+9
+00:00:54,300 --> 00:01:00,500
+Click one and that section loops
+
+10
+00:01:00,800 --> 00:01:07,000
+Drag across markers for a longer loop
+
+11
+00:01:07,300 --> 00:01:14,500
+Save any loop as a snippet
+
+12
+00:01:14,800 --> 00:01:22,000
+Chain snippets into a practice routine
+
+13
+00:01:22,300 --> 00:01:29,500
+Chord detection

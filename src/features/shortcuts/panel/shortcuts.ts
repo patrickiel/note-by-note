@@ -7,8 +7,9 @@ import type { ActionId } from '../../../core/model/types';
 import { snippets } from '../../snippets/panel/snippets.svelte';
 import { markers } from '../../markers/panel/markers.svelte';
 import { session } from '../../../core/state/session.svelte';
-import { settings } from '../../settings/panel/settings.svelte';
+import { settings, uiPrefs } from '../../settings/panel/settings.svelte';
 import { view } from '../../../core/state/view.svelte';
+import { timelineView } from '../../../ui/timeline/timeline-view.svelte';
 
 /** Builds the combo string a keydown event represents ("Shift+ArrowLeft"). */
 export function comboFromEvent(event: KeyboardEvent): string {
@@ -33,6 +34,17 @@ function nudgeTranspose(direction: -1 | 1): number {
     ? TRANSPOSE_RANGE_EXTENDED
     : TRANSPOSE_RANGE_STANDARD;
   return Math.max(-limit, Math.min(limit, session.params.transpose + direction));
+}
+
+/** The span a range action works on: the panel's marker selection, else a range
+ * loop restored from the engine. */
+function activeRange(): { startT: number; endT: number } | null {
+  return (
+    markers.range ??
+    (session.loop.mode?.kind === 'range'
+      ? { startT: session.loop.mode.startT, endT: session.loop.mode.endT }
+      : null)
+  );
 }
 
 function runAction(action: ActionId) {
@@ -94,14 +106,30 @@ function runAction(action: ActionId) {
       markers.selectCurrentSection();
       break;
     case 'addSnippet': {
-      const range =
-        markers.range ??
-        (session.loop.mode?.kind === 'range'
-          ? { startT: session.loop.mode.startT, endT: session.loop.mode.endT }
-          : null);
+      const range = activeRange();
       if (range) snippets.addFromRange(range.startT, range.endT);
       break;
     }
+    case 'zoomIn':
+      timelineView.zoomStep(1);
+      break;
+    case 'zoomOut':
+      timelineView.zoomStep(-1);
+      break;
+    case 'zoomFit': {
+      // One key for "get me oriented": lost in a zoomed view → back to the whole
+      // track; already looking at the whole track → frame what's being practised.
+      if (!timelineView.atFit) {
+        timelineView.zoomToFit();
+        break;
+      }
+      const range = activeRange();
+      if (range) timelineView.zoomToRange(range.startT, range.endT);
+      break;
+    }
+    case 'toggleFollow':
+      uiPrefs.setTimelineFollow(!uiPrefs.current.timelineFollow);
+      break;
     case 'power':
       session.togglePower();
       break;
