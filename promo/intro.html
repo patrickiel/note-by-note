@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Note by Note — screencast intro card</title>
+<!--
+  The title card capture-card.mjs renders to frames and apply-cards.ps1
+  prepends to the screencast. Skin, layout box and entrance keyframes come from
+  card.css; what is here is this card's own sizing and its stagger.
+-->
+<link rel="stylesheet" href="card.css">
+<style>
+  .glyph { width: 132px; height: 132px; }
+  h1     { margin-top: 34px; font-size: 82px; }
+  p      { margin-top: 30px; font-size: 34px; }
+  .lane  { margin-top: 54px; }
+  .caption { margin-top: 26px; }
+
+  /* Top to bottom, ~0.14 s apart: the card assembles in reading order. */
+  .glyph   { animation-name: lift;   animation-delay: 0.00s; }
+  h1       { animation-name: rise;   animation-delay: 0.14s; }
+  p        { animation-name: rise;   animation-delay: 0.28s; }
+  .lane    { animation-name: appear; animation-delay: 0.40s; }
+  /* The loop range draws itself in from its left edge — the one gesture on the
+     card that is the product doing something rather than a label appearing. */
+  .lane span {
+    transform-origin: left center;
+    animation-name: sweep;
+    animation-delay: 0.52s;
+    animation-duration: 0.7s;
+  }
+  .caption { animation-name: appear; animation-delay: 0.72s; }
+</style>
+</head>
+<body>
+<div class="card" role="img" aria-label="Note by Note title card">
+  <!-- The app's own mark: paths copied verbatim from src/assets/icon.svg, in
+       the same "4 4 17 17" crop scripts/generate-icons.mjs uses for the
+       toolbar PNGs. Vector, so it stays sharp at video resolution. -->
+  <svg class="glyph" viewBox="4 4 17 17" aria-hidden="true">
+    <circle cx="9.5" cy="17.5" r="3.5" fill="currentColor"/>
+    <path d="M11.5 4 L13 4 L19 6 L19 9.5 L13 7.5 L13 17.5 L11.5 17.5 Z" fill="currentColor"/>
+  </svg>
+
+  <h1>Note <em>by</em> Note</h1>
+  <!-- Broken by hand rather than by width: two balanced lines at any font metric. -->
+  <p>Pitch, speed, loops and snippets<br>on any audio or video.</p>
+  <div class="lane"><span></span></div>
+  <div class="caption">PRACTISE IN THE SIDE PANEL</div>
+</div>
+</body>
+</html>
