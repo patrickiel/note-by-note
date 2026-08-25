@@ -48,7 +48,7 @@ keep it consistent with the manifest's `data_collection_permissions`
 
 ## 3 — Firefox Add-ons (AMO)
 
-[Developer Hub](https://addons.mozilla.org/developers/) → the add-on → **Upload
+[Developer Hub](https://addons.mozilla.org/en-US/developers/addon/note-by-note/edit) → **Upload
 New Version** → upload the firefox zip **and the sources zip** (mandatory every
 upload — the build is bundled/minified). Notes to reviewer:
 
