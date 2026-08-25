@@ -41,22 +41,22 @@ class ConnectionManager {
   async init() {
     settings.onChange = pushSettings;
 
-    // Test/debug override: pin the panel to one tab (?tabId=N).
+    // Chromium opens one panel document per tab at `sidepanel.html?tabId=N`
+    // (see core/side-panel.ts): pin to that tab. Hidden behind another tab
+    // this document stays alive, and following activation there would leave
+    // it mirroring the wrong tab when Chrome shows it again. The E2E harness
+    // uses the same parameter to pin a panel opened as a plain tab. Firefox's
+    // window-global sidebar has no such parameter and follows the active tab.
     const pinned = new URLSearchParams(location.search).get('tabId');
     if (pinned) {
       await this.bindTab(Number(pinned));
-      browser.tabs.onUpdated.addListener((tabId, info) => {
-        if (tabId === this.tabId && info.status === 'complete') void this.bindTab(tabId);
+    } else {
+      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id != null) await this.bindTab(tab.id);
+      browser.tabs.onActivated.addListener(({ tabId }) => {
+        void this.bindTab(tabId);
       });
-      return;
     }
-
-    const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id != null) await this.bindTab(tab.id);
-
-    browser.tabs.onActivated.addListener(({ tabId }) => {
-      void this.bindTab(tabId);
-    });
     browser.tabs.onUpdated.addListener((tabId, info) => {
       if (tabId !== this.tabId) return;
       // Navigation completed: the engine needs re-injection + reconnect.

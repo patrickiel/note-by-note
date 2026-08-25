@@ -131,5 +131,4 @@ export interface ProtocolMap {
   captureVolume(data: { tabId: number; volume: number }): Promise<void>;
   /** Revoke Permissions. */
   revokeAllPermissions(): Promise<void>;
-  openLocalPlayer(): Promise<{ tabId: number }>;
 }

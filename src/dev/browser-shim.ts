@@ -96,6 +96,8 @@ if (!existing?.storage) {
     tabs: {
       query: async () => [],
       get: async () => ({}),
+      create: async () => ({ id: -1 }),
+      update: async () => ({}),
       connect: () => ({
         name: 'shim',
         postMessage: () => {},
@@ -105,6 +107,10 @@ if (!existing?.storage) {
       }),
       onActivated: makeEvent(),
       onUpdated: makeEvent(),
+    },
+    sidePanel: {
+      setOptions: async () => {},
+      open: async () => {},
     },
     permissions: {
       contains: async () => false,
