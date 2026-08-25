@@ -2,6 +2,7 @@ import type { OffscreenCommand } from '@/core/messaging/protocol';
 import { onMessage } from '@/core/messaging/rpc';
 import { grantedOriginsItem } from '@/core/persist/storage';
 import { CAN_CAPTURE_TAB, HAS_SIDE_PANEL_API } from '@/core/platform';
+import { disablePanelForTab, enablePanelForTab, isPanelShowing } from '@/core/side-panel';
 
 /** Firefox's sidebar API. WXT's `browser` types are Chromium-shaped and don't
  * declare it, so reach it through a narrow cast — only ever on the Firefox
@@ -68,6 +69,19 @@ async function syncFromPermissions() {
 }
 
 export default defineBackground(() => {
+  // Scope the panel to the tabs it was opened on: the manifest's
+  // `side_panel.default_path` enables it everywhere, so once opened it would
+  // follow the user to every tab. With the default disabled and the click
+  // handler enabling it per tab, Chrome hides the panel while a tab without it
+  // is active and brings it back when the user returns to one that has it.
+  // Idempotent, so re-applying on every worker start is fine (per-tab options
+  // live browser-side and survive worker restarts).
+  if (HAS_SIDE_PANEL_API) {
+    browser.sidePanel
+      .setOptions({ enabled: false })
+      .catch((err: unknown) => console.error('sidePanel default disable', err));
+  }
+
   // Open the side panel from an explicit action.onClicked handler rather than
   // setPanelBehavior({ openPanelOnActionClick: true }). With openPanelOnActionClick
   // the click is consumed by the panel and action.onClicked never fires, so the
@@ -75,9 +89,13 @@ export default defineBackground(() => {
   // has not been invoked for the current page". Handling the click ourselves is
   // what grants activeTab on the current tab, which tab capture relies on.
   browser.action.onClicked.addListener((tab) => {
-    // Firefox serves the same page as a sidebar_action. `toggle()` has to be
-    // reached synchronously from the click for Firefox to count it as a user
-    // gesture, so neither branch may await anything first.
+    // Both branches must reach their API call synchronously from the click:
+    // Firefox counts `toggle()` as a user gesture only then, and on Chromium
+    // the action's gesture does not survive an `await` — `sidePanel.open()`
+    // chained after `setOptions` is rejected with "may only be called in
+    // response to a user gesture". Fire both back to back instead; the calls
+    // are dispatched in order, so the per-tab option is in place when the
+    // open is evaluated (verified against Chrome 151).
     if (!HAS_SIDE_PANEL_API) {
       sidebarAction()
         .toggle()
@@ -85,9 +103,21 @@ export default defineBackground(() => {
       return;
     }
     if (tab.id != null) {
+      const tabId = tab.id;
+      // The click toggles. Its verdict can't gate the open (the gesture would
+      // be gone by the time it resolves), so snapshot the pre-click state,
+      // then enable + open unconditionally — a no-op when the panel is already
+      // showing — and close once the snapshot says it was.
+      const wasShowing = isPanelShowing(tabId);
+      enablePanelForTab(tabId).catch((err: unknown) =>
+        console.error('sidePanel enable for tab', err),
+      );
       browser.sidePanel
-        .open({ tabId: tab.id })
+        .open({ tabId })
         .catch((err: unknown) => console.error('sidePanel open', err));
+      wasShowing
+        .then((showing) => (showing ? disablePanelForTab(tabId) : undefined))
+        .catch((err: unknown) => console.error('sidePanel toggle', err));
     }
   });
 
@@ -147,13 +177,6 @@ export default defineBackground(() => {
     // Explicit reconcile in case permissions.remove resolved without firing
     // onRemoved (e.g. nothing to remove).
     await syncFromPermissions();
-  });
-
-  onMessage('openLocalPlayer', async () => {
-    const tab = await browser.tabs.create({
-      url: browser.runtime.getURL('/local-player.html'),
-    });
-    return { tabId: tab.id! };
   });
 
   // ─── Tab capture (Chromium only) ───────────────────────────

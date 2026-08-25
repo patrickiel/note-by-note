@@ -5,6 +5,7 @@ import { touchFavorite } from '../../features/library/persist/favorites';
 import { removeHistoryEntry, upsertHistory } from '../../features/library/persist/history';
 import { findSavedEntry } from '../../features/library/panel/saved-settings';
 import { loadTrackData, saveTrackData } from '../persist/storage';
+import { openTabWithPanel } from '../side-panel';
 import { trackDataDescriptors } from '../persist/track-data';
 import { session } from './session.svelte';
 import { settings } from '../../features/settings/panel/settings.svelte';
@@ -253,7 +254,9 @@ class TrackSync {
     if (tabId != null) {
       await browser.tabs.update(tabId, { url: entry.pageUrl });
     } else {
-      await browser.tabs.create({ url: entry.pageUrl });
+      // No engine tab to reuse — a fresh one the panel follows (a plain create
+      // would activate a tab the panel isn't enabled on and hide it).
+      await openTabWithPanel(entry.pageUrl);
     }
   }
 }

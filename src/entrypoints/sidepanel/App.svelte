@@ -6,6 +6,7 @@
   import SettingsView from '@/features/settings/panel/SettingsView.svelte';
   import TooltipLayer from '@/ui/shared/TooltipLayer.svelte';
   import { sendMessage } from '@/core/messaging/rpc';
+  import { openTabWithPanel } from '@/core/side-panel';
   import { installMockState, installMockTicker } from '@/dev/mock';
   import { connection } from '@/core/state/connect.svelte';
   import { CAN_CAPTURE_TAB } from '@/core/platform';
@@ -52,8 +53,11 @@
     },
   );
 
+  // Opened from here rather than via the background: the side panel has to
+  // follow the user to the player tab, and only this document holds the
+  // click's activation that `sidePanel.open()` requires.
   async function openLocalFile() {
-    await sendMessage('openLocalPlayer', undefined);
+    await openTabWithPanel(browser.runtime.getURL('/local-player.html'));
     view.close();
   }
 
