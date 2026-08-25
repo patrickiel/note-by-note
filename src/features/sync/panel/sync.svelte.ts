@@ -10,6 +10,7 @@ import {
 } from '../persist/sync-config';
 import { session } from '../../../core/state/session.svelte';
 import { deleteSnapshot, pullSnapshot, pushSnapshot, SyncHttpError } from './api';
+import { readIdCookie, writeIdCookie } from './id-cookie';
 import { snapshotHash } from './hash';
 
 /** Trailing debounce after the last data change before pushing. */
@@ -71,6 +72,20 @@ class SyncStore {
     this.#config = config;
     this.#id = syncId;
     this.#reflect();
+    if (syncId) {
+      // Keeps the durable copy's expiry rolling (see id-cookie.ts).
+      void writeIdCookie(syncId);
+    } else {
+      // No ID in the sync area: a fresh install, or a reinstall — the browser
+      // purged the extension's synced storage on uninstall. The cookie is
+      // this profile's own earlier ID, so taking it back is what the user
+      // expects and needs no consent; the reconcile below pulls the data.
+      const kept = await readIdCookie();
+      if (kept) {
+        await this.#saveId(kept);
+        await this.#saveConfig({ consentedId: kept });
+      }
+    }
     syncConfigItem.watch((value) => {
       if (this.#writing) return;
       this.#config = value ?? { ...DEFAULT_SYNC_CONFIG };
@@ -80,9 +95,18 @@ class SyncStore {
     // hand this one an ID (or replace it) at any time.
     syncIdItem.watch((value) => {
       if (this.#writing || value === this.#id) return;
+      if (value === null && this.#id && this.#config.consentedId === this.#id) {
+        // The key was deleted, not replaced — the sync area was purged (an
+        // uninstall on another device, a sync reset). Another device changing
+        // identity on purpose always arrives as a different string. Put our ID
+        // back rather than drift into minting a new one over the same data.
+        void this.#writeId(this.#id);
+        return;
+      }
       this.#id = value;
       this.#reflect();
       if (!this.#config.enabled || !value) return;
+      void writeIdCookie(value);
       // Identity changed while enabled: the bookkeeping refers to the old
       // blob — reset it and reconcile against the new one.
       void this.#saveConfig({ lastSyncedAt: 0, lastSyncedHash: null, pendingPush: false }).then(
@@ -268,9 +292,14 @@ class SyncStore {
     if (id === this.#id) return;
     this.#id = id;
     this.#reflect();
+    await this.#writeId(id);
+  }
+
+  /** Writes the stores only — `#id` is already what it should be. */
+  async #writeId(id: string | null) {
     this.#writing = true;
     try {
-      await syncIdItem.setValue(id);
+      await Promise.all([syncIdItem.setValue(id), id && writeIdCookie(id)]);
     } finally {
       this.#writing = false;
     }

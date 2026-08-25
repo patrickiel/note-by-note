@@ -80,7 +80,17 @@ export default defineConfig({
   },
   manifest: ({ mode, browser }) => ({
     // E2E runs can't click native permission prompts — grant hosts up front.
-    ...(mode === 'testing' ? { host_permissions: ['<all_urls>'] } : {}),
+    // Otherwise the only required host is the sync server's: the sync ID is
+    // kept as a cookie there so it outlives an uninstall (see
+    // src/features/sync/panel/id-cookie.ts), and `cookies.set` needs host
+    // access. Must match SYNC_ENDPOINT in src/features/sync/panel/api.ts.
+    host_permissions:
+      mode === 'testing'
+        ? ['<all_urls>']
+        : [
+            'https://note-by-note-sync.oapp.workers.dev/*',
+            ...(mode === 'development' ? ['http://localhost:8787/*'] : []),
+          ],
     name:
       browser === 'firefox'
         // AMO hard-caps manifest name at 45 characters.
@@ -123,6 +133,7 @@ export default defineConfig({
     // every caller on the same build target.
     permissions: [
       'storage',
+      'cookies',
       'activeTab',
       'scripting',
       'tabs',

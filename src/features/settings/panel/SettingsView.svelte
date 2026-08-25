@@ -593,7 +593,7 @@
         <div class="flex flex-col items-start gap-2 py-2.5 px-3 border-t border-line">
           {@render prefText(
             'Your sync ID',
-            'Devices signed into the same browser profile pick this ID up automatically; elsewhere, enter it by hand. Keep it private — anyone who has it can read and change your data.',
+            'Devices signed into the same browser profile pick this ID up automatically; elsewhere, enter it by hand. It survives a reinstall (it is kept in this browser profile, not in the extension) but not clearing the browser’s cookies — keep a copy for that. Keep it private — anyone who has it can read and change your data.',
           )}
           <div class="flex items-center gap-2 w-full">
             <code
@@ -660,7 +660,9 @@
         {:else if sync.enabled}
           <div class="text-[12px] text-muted py-2.5 px-3 border-t border-line">
             Sync is on. Your private ID is created as soon as there is something to
-            sync — a song in Recent, a marker, an EQ preset.
+            sync — a song in Recent, a marker, an EQ preset. On a new device, the ID
+            from your other devices arrives through browser sync within a minute or so;
+            if it doesn't, paste it below.
           </div>
         {/if}
         <div class="flex flex-col items-start gap-2 py-2.5 px-3 border-t border-line">

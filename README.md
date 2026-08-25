@@ -187,6 +187,16 @@ something to sync; `Settings → Sync → Delete synced data` removes the server
 copy. Nothing else in the extension talks to the network: there is no telemetry
 and no analytics.
 
+The ID lives in the browser's synced extension storage, so a second device on
+the same profile picks it up by itself. The browser wipes that storage (on
+every device) when the extension is uninstalled, so the ID is also kept as a
+long-lived cookie on the sync server's domain — the one profile-level store an
+extension can write that outlives it. That is what the `cookies` permission and
+the single host permission are for: a reinstall reads the cookie, restores the
+ID and pulls the data back. The cookie is read only through the `cookies` API
+and never sent with a request (the ID travels in a header). Clearing browser
+cookies removes it, so the panel still shows the ID for copying.
+
 ## License
 
 GPL-2.0-or-later — see [LICENSE](LICENSE) for the full text and
