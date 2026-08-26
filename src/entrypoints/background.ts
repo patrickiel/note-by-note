@@ -3,6 +3,7 @@ import { onMessage } from '@/core/messaging/rpc';
 import { grantedOriginsItem } from '@/core/persist/storage';
 import { CAN_CAPTURE_TAB, HAS_SIDE_PANEL_API } from '@/core/platform';
 import { disablePanelForTab, enablePanelForTab, isPanelShowing } from '@/core/side-panel';
+import { SYNC_HOST_PATTERNS } from '@/features/sync/sync-hosts';
 
 /** Firefox's sidebar API. WXT's `browser` types are Chromium-shaped and don't
  * declare it, so reach it through a narrow cast — only ever on the Firefox
@@ -25,6 +26,13 @@ function originPattern(url: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** The sync host is held for the ID cookie, not for practising on — it is
+ * neither a site to register the engine on nor one "Revoke Permissions" should
+ * take back. Everything else `permissions.getAll()` reports is a site grant. */
+function siteOrigins(origins: string[]): string[] {
+  return origins.filter((o) => !SYNC_HOST_PATTERNS.includes(o));
 }
 
 /** Content-script match patterns for the origins we hold. `<all_urls>` is a
@@ -64,8 +72,9 @@ async function syncRegistration(matches: string[]) {
  * extensions UI, or revoke button). */
 async function syncFromPermissions() {
   const { origins = [] } = await browser.permissions.getAll();
-  await grantedOriginsItem.setValue(origins);
-  await syncRegistration(registrationMatches(origins));
+  const sites = siteOrigins(origins);
+  await grantedOriginsItem.setValue(sites);
+  await syncRegistration(registrationMatches(sites));
 }
 
 export default defineBackground(() => {
@@ -169,8 +178,11 @@ export default defineBackground(() => {
 
   onMessage('revokeAllPermissions', async () => {
     const { origins = [] } = await browser.permissions.getAll();
-    if (origins.length) {
-      await browser.permissions.remove({ origins }).catch(() => {
+    // `<all_urls>` covers the sync host, so revoking it also ends cookie access;
+    // the panel re-requests it from the Sync settings when needed.
+    const sites = siteOrigins(origins);
+    if (sites.length) {
+      await browser.permissions.remove({ origins: sites }).catch(() => {
         // Some patterns may already be gone; onRemoved still reconciles below.
       });
     }

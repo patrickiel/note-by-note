@@ -10,7 +10,13 @@ import {
 } from '../persist/sync-config';
 import { session } from '../../../core/state/session.svelte';
 import { deleteSnapshot, pullSnapshot, pushSnapshot, SyncHttpError } from './api';
-import { readIdCookie, writeIdCookie } from './id-cookie';
+import {
+  hasIdCookieAccess,
+  readIdCookie,
+  removeIdCookie,
+  requestIdCookieAccess,
+  writeIdCookie,
+} from './id-cookie';
 import { snapshotHash } from './hash';
 
 /** Trailing debounce after the last data change before pushing. */
@@ -49,6 +55,9 @@ class SyncStore {
    * own. Applying would overwrite it, so the panel asks first — see
    * `acceptRemote` / `keepLocal`. */
   needsConsent = $state(false);
+  /** Whether the ID's durable copy can be kept — host access to the sync
+   * origin is held (see id-cookie.ts). Drives the Settings copy. */
+  durable = $state(false);
   #syncing = $state(false);
 
   status = $derived<'off' | 'syncing' | 'error' | 'idle'>(
@@ -59,6 +68,12 @@ class SyncStore {
   /** Mirrors `syncIdItem` — the ID lives in browser-synced storage (see
    * `persist/sync-config.ts`), separate from the per-device bookkeeping. */
   #id: string | null = null;
+  /** The ID last handed to `writeIdCookie` by this document, so `#reflect`
+   * writes the cookie once per identity rather than on every state change. */
+  #cookieId: string | null = null;
+  /** Suppresses the echo of our own `syncConfigItem` write. The ID watcher
+   * needs no such flag: its own echo carries `value === #id` and is skipped by
+   * value, so a real event from another device is never dropped. */
   #writing = false;
   /** Suppresses change events while `restoreBackup` writes a remote snapshot,
    * so applying can't schedule a push of what was just pulled. */
@@ -68,24 +83,17 @@ class SyncStore {
   #queue: Promise<unknown> = Promise.resolve();
 
   async init() {
-    const { config, syncId } = await loadSyncState();
+    const [{ config, syncId }, kept, durable] = await Promise.all([
+      loadSyncState(),
+      readIdCookie(),
+      hasIdCookieAccess(),
+    ]);
+    this.durable = durable;
     this.#config = config;
     this.#id = syncId;
     this.#reflect();
-    if (syncId) {
-      // Keeps the durable copy's expiry rolling (see id-cookie.ts).
-      void writeIdCookie(syncId);
-    } else {
-      // No ID in the sync area: a fresh install, or a reinstall — the browser
-      // purged the extension's synced storage on uninstall. The cookie is
-      // this profile's own earlier ID, so taking it back is what the user
-      // expects and needs no consent; the reconcile below pulls the data.
-      const kept = await readIdCookie();
-      if (kept) {
-        await this.#saveId(kept);
-        await this.#saveConfig({ consentedId: kept });
-      }
-    }
+    // Watchers go up before any write below, so nothing arriving from another
+    // device in the meantime is missed.
     syncConfigItem.watch((value) => {
       if (this.#writing) return;
       this.#config = value ?? { ...DEFAULT_SYNC_CONFIG };
@@ -94,25 +102,34 @@ class SyncStore {
     // The ID is browser-synced: another device on this browser profile can
     // hand this one an ID (or replace it) at any time.
     syncIdItem.watch((value) => {
-      if (this.#writing || value === this.#id) return;
-      if (value === null && this.#id && this.#config.consentedId === this.#id) {
+      if (value === this.#id) return;
+      if (value === null && this.#id) {
         // The key was deleted, not replaced — the sync area was purged (an
         // uninstall on another device, a sync reset). Another device changing
         // identity on purpose always arrives as a different string. Put our ID
         // back rather than drift into minting a new one over the same data.
+        // Consent is not a factor: it gates applying remote data (see
+        // `#startReconcile`), not holding an identity.
         void this.#writeId(this.#id);
         return;
       }
       this.#id = value;
       this.#reflect();
-      if (!this.#config.enabled || !value) return;
-      void writeIdCookie(value);
+      if (!this.#config.enabled) return;
       // Identity changed while enabled: the bookkeeping refers to the old
       // blob — reset it and reconcile against the new one.
       void this.#saveConfig({ lastSyncedAt: 0, lastSyncedHash: null, pendingPush: false }).then(
         () => this.#startReconcile({ allowApply: session.media === null }),
       );
     });
+    // Connect's `<all_urls>` grant (and Revoke Permissions) changes cookie
+    // access without going through this store.
+    browser.permissions.onAdded.addListener(() => void this.#refreshDurable());
+    browser.permissions.onRemoved.addListener(() => void this.#refreshDurable());
+
+    // Best-effort like every other sync-area write: a failure here must not
+    // keep the listeners below from being installed.
+    await this.#recoverId(kept).catch(() => {});
 
     browser.storage.local.onChanged.addListener((changes) => {
       if (this.#applying) return;
@@ -191,6 +208,8 @@ class SyncStore {
    * none received from another device via browser sync — generates one and
    * uploads this device's data; otherwise reuses the ID and reconciles. */
   async enable(): Promise<void> {
+    // In a gesture, so the durable copy can be authorised in the same breath.
+    await this.#ensureDurable();
     const fresh = this.#id === null;
     const id = this.#id ?? generateSyncId();
     await this.#saveId(id);
@@ -212,7 +231,8 @@ class SyncStore {
   /**
    * Removes this ID's snapshot from the server. Sync is switched off too —
    * leaving it on would re-upload from the next change and quietly undo the
-   * deletion. The ID is kept, so turning sync back on starts a fresh blob.
+   * deletion. The ID is kept, so turning sync back on starts a fresh blob; its
+   * durable copy is not, so a reinstall does not quietly bring it back.
    */
   async deleteRemote(): Promise<void> {
     const id = this.#id;
@@ -230,6 +250,8 @@ class SyncStore {
           pendingPush: false,
           lastError: null,
         });
+        this.#cookieId = null;
+        await removeIdCookie();
       } catch (err) {
         await this.#saveConfig({ lastError: errorMessage(err) });
         throw err;
@@ -248,6 +270,7 @@ class SyncStore {
   async connectWithId(rawId: string): Promise<'applied' | 'uploaded'> {
     const id = rawId.trim();
     if (!SYNC_ID_RE.test(id)) throw new Error("That doesn't look like a sync ID.");
+    await this.#ensureDurable();
     await this.#saveId(id);
     // Typing in someone else's ID, past the UI's confirm, is the consent.
     await this.#saveConfig({
@@ -279,12 +302,64 @@ class SyncStore {
     await this.#startReconcile({ allowApply: true });
   }
 
+  /** Settings → "Keep after reinstall". Must run in a user gesture. */
+  async keepAfterReinstall(): Promise<boolean> {
+    return this.#ensureDurable();
+  }
+
+  /** Asks for cookie access if it isn't held yet; a refusal is not an error —
+   * sync works without the durable copy, the panel just says so. */
+  async #ensureDurable(): Promise<boolean> {
+    if (!this.durable) this.durable = await requestIdCookieAccess();
+    if (this.durable) await this.#onDurable();
+    return this.durable;
+  }
+
+  async #refreshDurable() {
+    const durable = await hasIdCookieAccess();
+    if (durable === this.durable) return;
+    this.durable = durable;
+    if (durable) await this.#onDurable();
+  }
+
+  /** Access just became available. On a reinstall it usually arrives after
+   * `init` (Connect is the first thing pressed), so the cookie could not be
+   * read then — look again before an ID is minted over it; otherwise write
+   * (or refresh) the copy now that it is allowed. */
+  async #onDurable() {
+    if (this.#id === null) await this.#recoverId(await readIdCookie());
+    this.#cookieId = null;
+    this.#reflect();
+  }
+
+  /** No ID in the sync area: a fresh install, or a reinstall — the browser
+   * purged the extension's synced storage on uninstall. The cookie is this
+   * profile's own earlier ID, so taking it back is what the user expects and
+   * needs no consent; the next reconcile pulls the data. */
+  async #recoverId(kept: string | null) {
+    if (this.#id === null && kept) await this.#adoptId(kept);
+  }
+
   #reflect() {
     this.enabled = this.#config.enabled;
     this.syncId = this.#id;
     this.lastSyncedAt = this.#config.lastSyncedAt;
     this.lastError = this.#config.lastError;
     if (!this.#config.enabled || this.#config.consentedId === this.#id) this.needsConsent = false;
+    // The one place the durable copy is written: whenever sync is on with an
+    // ID — received, minted, connected or restored — once per identity per
+    // document (which also keeps its expiry rolling).
+    const keep = this.#config.enabled ? this.#id : null;
+    if (keep && keep !== this.#cookieId) {
+      this.#cookieId = keep;
+      void writeIdCookie(keep);
+    }
+  }
+
+  /** An ID this device originated or recovered is its own — consent implied. */
+  async #adoptId(id: string) {
+    await this.#saveId(id);
+    await this.#saveConfig({ consentedId: id });
   }
 
   /** Sync-area writes are quota-limited (~120/min), so no-ops are skipped. */
@@ -295,14 +370,10 @@ class SyncStore {
     await this.#writeId(id);
   }
 
-  /** Writes the stores only — `#id` is already what it should be. */
+  /** Writes the sync area only — `#id` is already what it should be, and the
+   * cookie follows from `#reflect`. */
   async #writeId(id: string | null) {
-    this.#writing = true;
-    try {
-      await Promise.all([syncIdItem.setValue(id), id && writeIdCookie(id)]);
-    } finally {
-      this.#writing = false;
-    }
+    await syncIdItem.setValue(id);
   }
 
   async #saveConfig(patch: Partial<SyncConfig>) {
@@ -341,9 +412,7 @@ class SyncStore {
     // arrive first, and avoids seeding a blob for an install nobody uses.
     // Minting our own means this device started the data set — consent implied.
     if (!this.#id) {
-      const minted = generateSyncId();
-      await this.#saveId(minted);
-      await this.#saveConfig({ consentedId: minted });
+      await this.#adoptId(generateSyncId());
       opts = { force: true };
     }
     const id = this.#id;

@@ -189,13 +189,13 @@ and no analytics.
 
 The ID lives in the browser's synced extension storage, so a second device on
 the same profile picks it up by itself. The browser wipes that storage (on
-every device) when the extension is uninstalled, so the ID is also kept as a
-long-lived cookie on the sync server's domain — the one profile-level store an
-extension can write that outlives it. That is what the `cookies` permission and
-the single host permission are for: a reinstall reads the cookie, restores the
-ID and pulls the data back. The cookie is read only through the `cookies` API
-and never sent with a request (the ID travels in a header). Clearing browser
-cookies removes it, so the panel still shows the ID for copying.
+every device) when the extension is uninstalled, so the ID can also be kept as
+a cookie on the sync server's domain, which outlives the extension — that is
+what the `cookies` permission and the optional access to that one domain are
+for (`Settings → Sync → Keep the ID after a reinstall`; the **Connect** grant
+covers it too). How and why, and what it does not survive, is documented in
+[id-cookie.ts](src/features/sync/panel/id-cookie.ts). Self-hosters change the
+URL in [sync-hosts.ts](src/features/sync/sync-hosts.ts) and rebuild.
 
 ## License
 

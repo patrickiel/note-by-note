@@ -27,7 +27,7 @@ Not included: audio, page content, keystrokes, browsing history beyond the track
 
 **Where it goes**
 
-Snapshots are stored by a Cloudflare Worker with Cloudflare KV, at `https://note-by-note-sync.oapp.workers.dev`, operated by the author. The server source is in the repository and can be self-hosted — self-hosters change one constant and rebuild.
+Snapshots are stored by a Cloudflare Worker with Cloudflare KV, at `https://note-by-note-sync.oapp.workers.dev`, operated by the author. The server source is in the repository and can be self-hosted — self-hosters change one URL (`src/features/sync/sync-hosts.ts`) and rebuild.
 
 - There are no accounts. A random 43-character sync ID is the only credential; it *is* the capability, so treat it like a password.
 - The ID travels in an `X-Sync-Id` header, never in the URL, so it does not land in request logs. KV is keyed by its SHA-256, so the raw ID is not stored either.

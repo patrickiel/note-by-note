@@ -1,10 +1,5 @@
 import { parseBackup, type Backup } from '../../../core/persist/backup';
-
-/** The sync worker (see /server). CORS is open there, so no host_permissions
- * are needed; self-hosters change this constant and rebuild. */
-export const SYNC_ENDPOINT = import.meta.env.DEV
-  ? 'http://localhost:8787'
-  : 'https://note-by-note-sync.oapp.workers.dev';
+import { SYNC_ENDPOINT } from '../endpoint';
 
 export class SyncHttpError extends Error {
   constructor(

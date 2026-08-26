@@ -82,7 +82,7 @@ one constant and rebuild.
 | `activeTab`, `scripting` | Injects the audio engine into the tab when you press **Connect**. |
 | `tabs` | Reads the active tab's URL and title to look up the practice data you saved for that track. |
 | `tabCapture`, `offscreen` (Chrome only) | Fallback audio path for pages that block the audio worklet. |
-| `cookies` + access to the sync server's domain | Keeps a copy of your sync ID as a cookie on the sync server's domain, the one place the browser does not wipe when the extension is uninstalled — so a reinstall gets your data back. It is read only through the extension API and never sent with a request (the sync ID travels in a header). No other site's cookies are touched. |
+| `cookies` + access to the sync server's domain (optional) | Keeps a copy of your sync ID as a cookie on the sync server's domain, the one place the browser does not wipe when the extension is uninstalled — so a reinstall gets your data back. Access to that domain is requested from `Settings → Sync` (or comes with **Connect**), never at install time. The cookie is read only through the extension API and never sent with a request (the sync ID travels in a header). No other site's cookies are touched; `Delete synced data` removes it. |
 | Access to all sites (optional) | Requested **only** when you first press **Connect**, never at install time, because you choose which sites to practise on. `Settings → Revoke Permissions` takes it back. |
 
 ## Children

@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'wxt';
+import { SYNC_ENDPOINT_PROD, SYNC_HOST_PATTERNS, syncHostPattern } from './src/features/sync/sync-hosts';
 
 // Persistent dev profile: extensions installed here (e.g. uBlock Origin
 // Lite for YouTube-breakage repros), logins, and site data survive between
@@ -80,17 +81,10 @@ export default defineConfig({
   },
   manifest: ({ mode, browser }) => ({
     // E2E runs can't click native permission prompts — grant hosts up front.
-    // Otherwise the only required host is the sync server's: the sync ID is
-    // kept as a cookie there so it outlives an uninstall (see
-    // src/features/sync/panel/id-cookie.ts), and `cookies.set` needs host
-    // access. Must match SYNC_ENDPOINT in src/features/sync/panel/api.ts.
-    host_permissions:
-      mode === 'testing'
-        ? ['<all_urls>']
-        : [
-            'https://note-by-note-sync.oapp.workers.dev/*',
-            ...(mode === 'development' ? ['http://localhost:8787/*'] : []),
-          ],
+    // Nothing is required otherwise: a required host would make Chrome disable
+    // the extension on update until re-approved, and Firefox treats MV3
+    // `host_permissions` as opt-in anyway.
+    ...(mode === 'testing' ? { host_permissions: ['<all_urls>'] } : {}),
     name:
       browser === 'firefox'
         // AMO hard-caps manifest name at 45 characters.
@@ -139,7 +133,15 @@ export default defineConfig({
       'tabs',
       ...(browser === 'firefox' ? [] : ['tabCapture', 'offscreen']),
     ],
-    optional_host_permissions: ['<all_urls>'],
+    // `<all_urls>` is what Connect asks for. The sync host is what the ID
+    // cookie needs (see src/features/sync/panel/id-cookie.ts) — requested from
+    // the Sync settings, and covered by `<all_urls>` too once that is granted.
+    // Non-production builds also list the localhost Worker so `pnpm dev` can
+    // exercise the cookie path.
+    optional_host_permissions: [
+      '<all_urls>',
+      ...(mode === 'production' ? [syncHostPattern(SYNC_ENDPOINT_PROD)] : SYNC_HOST_PATTERNS),
+    ],
     action: {
       default_title: 'Note by Note',
     },

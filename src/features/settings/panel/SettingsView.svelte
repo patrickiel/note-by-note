@@ -242,6 +242,13 @@
     }
   }
 
+  async function keepAfterReinstall() {
+    syncNotice = null;
+    if (!(await sync.keepAfterReinstall())) {
+      syncNotice = { ok: false, text: 'Permission not granted — the ID is not kept after a reinstall.' };
+    }
+  }
+
   async function copySyncId() {
     if (!sync.syncId) return;
     await navigator.clipboard.writeText(sync.syncId);
@@ -593,7 +600,7 @@
         <div class="flex flex-col items-start gap-2 py-2.5 px-3 border-t border-line">
           {@render prefText(
             'Your sync ID',
-            'Devices signed into the same browser profile pick this ID up automatically; elsewhere, enter it by hand. It survives a reinstall (it is kept in this browser profile, not in the extension) but not clearing the browser’s cookies — keep a copy for that. Keep it private — anyone who has it can read and change your data.',
+            'Devices signed into the same browser profile pick this ID up automatically; elsewhere, enter it by hand. Keep it private — anyone who has it can read and change your data.',
           )}
           <div class="flex items-center gap-2 w-full">
             <code
@@ -609,6 +616,26 @@
               {idCopied ? 'Copied' : 'Copy'}
             </button>
           </div>
+        </div>
+        <div class="flex items-center gap-3 py-2.5 px-3 border-t border-line">
+          <!-- Copy defers to id-cookie.ts; only what the user acts on is stated. -->
+          {@render prefText(
+            'Keep the ID after a reinstall',
+            sync.durable
+              ? 'On. A copy is kept in this browser profile, outside the extension — but not past clearing the browser’s cookies, so keep a copy for that.'
+              : 'Uninstalling wipes the ID from the extension. Allow access to the sync server’s domain to keep a copy in this browser profile instead — nothing else is accessed.',
+          )}
+          {#if !sync.durable}
+            <button
+              type="button"
+              class="flex-none py-1 px-2 text-[13px] font-bold text-accent-ink rounded-sm hover:not-disabled:bg-accent-soft disabled:opacity-40 disabled:cursor-default"
+              disabled={syncBusy}
+              onclick={() => void keepAfterReinstall()}
+              {@attach tooltip('Allow the extension to keep the ID on the sync server’s domain')}
+            >
+              Allow
+            </button>
+          {/if}
         </div>
         <div class="flex items-center gap-3 py-2.5 px-3 border-t border-line">
           <span

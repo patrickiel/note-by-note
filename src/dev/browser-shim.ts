@@ -116,6 +116,8 @@ if (!existing?.storage) {
       contains: async () => false,
       request: async () => false,
       remove: async () => true,
+      onAdded: makeEvent(),
+      onRemoved: makeEvent(),
     },
   };
   // Mutate the page's real `chrome` object in place (rather than replacing the
