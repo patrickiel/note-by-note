@@ -2,6 +2,7 @@
   import Panel from '@/ui/Panel.svelte';
   import SliderRow from '@/ui/SliderRow.svelte';
   import Stepper from '@/ui/shared/Stepper.svelte';
+  import DetectButton from '@/ui/shared/DetectButton.svelte';
   import { tooltip } from '@/ui/shared/tooltip.svelte';
   import { DEFAULT_PARAMS } from '@/core/model/defaults';
   import { formatSpeedPct } from '@/core/model/format';
@@ -74,36 +75,15 @@
   <!-- Tempo tools sit on their own row under the slider, split off by a dashed
        divider (matches the mockup's Speed layout). Collapsed by default. -->
   <div class="flex items-center gap-1.5 border-t border-dashed border-line pt-2.5">
-    <button
-      type="button"
-      class={[
-        'relative flex-none rounded-[7px] border px-2.25 py-1 font-mono text-[10px] font-bold tracking-[0.08em]',
-        session.bpmDetecting
-          ? 'detecting text-accent-ink border-accent-line bg-accent-softer'
-          : 'text-muted border-line-strong ghost active:not-disabled:bg-inset active:not-disabled:text-accent',
-      ]}
-      aria-label={session.bpmDetecting ? 'Detecting tempo' : 'Detect tempo'}
-      aria-busy={session.bpmDetecting}
+    <DetectButton
+      detecting={session.bpmDetecting}
       disabled={!canDetect}
+      subject="tempo"
+      hint="Measure the tempo of the playing audio"
+      noResult={session.bpmNoResult}
+      noResultHint="Couldn't detect a tempo — try a louder or more rhythmic section"
       onclick={() => session.detectBpm()}
-      {@attach tooltip(
-        session.bpmNoResult
-          ? "Couldn't detect a tempo — try a louder or more rhythmic section"
-          : 'Measure the tempo of the playing audio',
-      )}
-    >
-      <!-- The label stays in the DOM (hidden while detecting) so the button
-           keeps a constant width; the meter overlays it in fixed columns. -->
-      <span class="detect-label">DETECT</span>
-      {#if session.bpmDetecting}
-        <span class="eq" aria-hidden="true">
-          <i class="bar"></i>
-          <i class="bar"></i>
-          <i class="bar"></i>
-          <i class="bar"></i>
-        </span>
-      {/if}
-    </button>
+    />
     <button
       type="button"
       class="flex-none rounded-[7px] border border-line-strong px-2.25 py-1 font-mono text-[10px] font-bold tracking-[0.08em] text-muted ghost active:not-disabled:bg-inset active:not-disabled:text-accent"
@@ -164,63 +144,3 @@
   />
 </Panel>
 
-<style>
-  /* Hidden but still laid out → the button width stays fixed at "DETECT". */
-  .detecting .detect-label {
-    visibility: hidden;
-  }
-
-  /* A small spectrum meter: fixed-width bars centered over the button, so only
-     their HEIGHT animates. All bars share one keyframe; per-bar animation-delay
-     scatters the phase so they bob out of sync. (The keyframe name must stay in
-     the `animation` shorthand — a nameless one gets minified to `none`.) */
-  .eq {
-    position: absolute;
-    inset: 0;
-    margin: auto;
-    width: 22px;
-    display: flex;
-    align-items: center;
-  }
-
-  .bar {
-    flex: 1 1 0;
-    min-width: 0;
-    font-size: 9px;
-    line-height: 1;
-    font-style: normal;
-    text-align: center;
-  }
-
-  .bar::before {
-    content: '▃';
-    animation: eq 1.1s steps(1, end) infinite;
-  }
-  .bar:nth-child(2)::before {
-    animation-delay: -0.45s;
-  }
-  .bar:nth-child(3)::before {
-    animation-delay: -0.2s;
-  }
-  .bar:nth-child(4)::before {
-    animation-delay: -0.75s;
-  }
-
-  @keyframes eq {
-    0% { content: '▁'; }
-    12.5% { content: '▃'; }
-    25% { content: '▅'; }
-    37.5% { content: '▆'; }
-    50% { content: '▇'; }
-    62.5% { content: '▆'; }
-    75% { content: '▅'; }
-    87.5% { content: '▃'; }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .bar::before {
-      content: '▄';
-      animation: none;
-    }
-  }
-</style>

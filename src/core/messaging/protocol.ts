@@ -8,6 +8,7 @@ import type {
 import type { ChordCommand, ChordEngineEvent } from '../../features/chords/protocol';
 import type { CountInEngineEvent } from '../../features/count-in/protocol';
 import type { LoopCommand, LoopEngineEvent } from '../../features/loops/protocol';
+import type { PitchCommand, PitchEngineEvent } from '../../features/pitch/protocol';
 import type { SnippetCommand, SnippetEngineEvent } from '../../features/snippets/protocol';
 import type { SpeedCommand, SpeedEngineEvent } from '../../features/speed/protocol';
 
@@ -71,6 +72,7 @@ export type EngineEvent =
   | CountInEngineEvent
   | SnippetEngineEvent
   | SpeedEngineEvent
+  | PitchEngineEvent
   | ChordEngineEvent;
 
 /** Core side panel → engine commands: transport/params/volume/settings. */
@@ -106,6 +108,7 @@ export type EngineCommand =
   | LoopCommand
   | SnippetCommand
   | SpeedCommand
+  | PitchCommand
   | ChordCommand;
 
 /** Background → offscreen document (runtime messages, offscreen filters by target). */

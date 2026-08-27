@@ -5,6 +5,7 @@
 // the controller.
 import { attachAudio } from '@/core/engine/attach-audio';
 import { detectBpmFromAnalyser } from '@/features/speed/engine/detect-bpm';
+import { detectTuningFromAnalyser, TUNING_FFT_SIZE } from '@/features/pitch/engine/detect-tuning';
 import type { PcmTap } from '@/features/chords/engine/pcm-tap';
 import type { AudioPipeline } from '@/core/audio/pipeline';
 import {
@@ -110,10 +111,12 @@ export class Controller {
   ports = new Set<UiPort>();
   /** Whether the DSP chain is attached ('direct') or blocked ('unavailable'). */
   pitchMode: 'pending' | 'direct' | 'unavailable' = 'pending';
-  /** The attached pipeline (analyser tap for BPM detection); null when blocked. */
+  /** The attached pipeline (analyser tap for BPM/tuning detection); null when blocked. */
   #pipeline: AudioPipeline | null = null;
   /** True while a BPM detection run is in flight (blocks overlapping runs). */
   #detectingBpm = false;
+  /** True while a reference-tuning detection run is in flight. */
+  #detectingTuning = false;
   /** User intent: stream PCM to the panel for chord detection while on. */
   #chordEnabled = false;
   /** The silent PCM tap (lives on the pipeline), while streaming is active. */
@@ -376,6 +379,7 @@ export class Controller {
     // A run in flight aborts via #abortDetect (engine identity change); flip the
     // flag now so its 'bpm' completion event still reports detecting:false.
     this.#detectingBpm = false;
+    this.#detectingTuning = false;
     // Stop PCM streaming — the pipeline (and its tap) is gone. #chordEnabled
     // persists so streaming resumes when the next chain attaches.
     this.#stopPcm();
@@ -411,6 +415,77 @@ export class Controller {
     } finally {
       this.#detectingBpm = false;
       this.broadcast({ type: 'bpm', detecting: false, bpm });
+    }
+  }
+
+  /** Measure the recording's reference A4 and report it (Hz). Direct/local
+   * only — the analyser tap lives here. The tap is pre-stretch and the element
+   * plays with preservesPitch, so speed/transpose don't colour the reading. */
+  async #detectTuning() {
+    const engine = this.engine;
+    if (
+      this.#detectingTuning ||
+      this.pitchMode !== 'direct' ||
+      !engine ||
+      !engine.playing ||
+      !this.#pipeline
+    ) {
+      console.debug('[note-by-note] tuning: detect skipped', {
+        inFlight: this.#detectingTuning,
+        pitchMode: this.pitchMode,
+        playing: engine?.playing ?? null,
+        hasPipeline: !!this.#pipeline,
+      });
+      return;
+    }
+    this.#detectingTuning = true;
+    this.broadcast({ type: 'tuning', detecting: true, hz: null });
+    const t0 = performance.now();
+    const pipeline = this.#pipeline;
+    console.debug('[note-by-note] tuning: detect start', {
+      sampleRate: pipeline.ctx.sampleRate,
+      fftSize: TUNING_FFT_SIZE,
+      durationMs: 4000,
+      playbackRate: engine.el.playbackRate,
+      mediaTime: Number(engine.el.currentTime.toFixed(2)),
+      currentTuning: { ...engine.params.tuning },
+    });
+    let hz: number | null = null;
+    try {
+      const est = await detectTuningFromAnalyser(
+        pipeline.analyser,
+        {
+          durationMs: 4000,
+          onFrame: ({ index, atMs, loudestDb }) =>
+            console.debug(
+              `[note-by-note] tuning: frame ${index} at ${atMs.toFixed(0)} ms, loudest ${loudestDb.toFixed(1)} dB`,
+            ),
+        },
+        () => this.#abortDetect(engine),
+      );
+      const aborted = this.#abortDetect(engine);
+      const d = est.details;
+      console.debug('[note-by-note] tuning: estimate', {
+        hz: est.hz,
+        confidence: Number(est.confidence.toFixed(3)),
+        accepted: d.accepted,
+        aborted,
+        frames: `${d.usedFrames}/${d.frames} used`,
+        devCents: Number(d.devCents.toFixed(1)),
+        peakCents: d.peakCents,
+        runnerUpCents: d.runnerUpCents,
+        peakScore: Number(d.peakScore.toFixed(1)),
+        meanScore: Number(d.meanScore.toFixed(1)),
+        runnerUpScore: Number(d.runnerUpScore.toFixed(1)),
+        elapsedMs: Math.round(performance.now() - t0),
+      });
+      if (est.hz != null && !aborted) hz = est.hz;
+    } catch (err) {
+      console.warn('[note-by-note] tuning: detection failed', err);
+    } finally {
+      this.#detectingTuning = false;
+      console.debug('[note-by-note] tuning: result', { hz });
+      this.broadcast({ type: 'tuning', detecting: false, hz });
     }
   }
 
@@ -570,6 +645,9 @@ export class Controller {
         break;
       case 'detectBpm':
         void this.#detectBpm();
+        break;
+      case 'detectTuning':
+        void this.#detectTuning();
         break;
       case 'chordDetect':
         this.#chordDetect(cmd.on);

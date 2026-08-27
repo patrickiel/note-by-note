@@ -35,6 +35,7 @@ web-ext.config.ts
 .browsers
 # Generated once by `node e2e/make-tone.mjs` / `node e2e/make-stereo-mix.mjs`.
 e2e/fixtures/tone-440.wav
+e2e/fixtures/tone-432.wav
 e2e/fixtures/stereo-mix.wav
 # Generated at postinstall / build:before from the @echogarden/rubberband-wasm
 # glue (rb.wasm itself is committed). See scripts/build-rubberband-worklet.mjs.
