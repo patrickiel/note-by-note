@@ -42,7 +42,8 @@
 
   // The reference-tuning correction, in cents (what the engine adds on top of
   // the fine-tune — see netSemitones). The slider shows the SUM so a detected
-  // tuning visibly moves it; dragging still edits the fine-tune underneath.
+  // tuning visibly moves it; dragging still edits the fine-tune underneath,
+  // which the Song row then reflects (see songHz).
   let tuningCents = $derived(
     Math.round(
       1200 * Math.log2(session.params.tuning.instrumentHz / session.params.tuning.trackHz),
@@ -64,8 +65,38 @@
     session.patchParams({ pitchCents: cents });
   }
 
+  // "Change to" is the user's instrument — fixed. A manual pitch change is
+  // therefore a statement about the SONG ("it's really at 430"), so the Song
+  // row shows the stored value moved by the fine-tune: slider drags, the ±
+  // steppers and the shortcuts all visibly move it, and the target stays put.
+  let songHz = $derived(
+    session.params.tuning.trackHz * 2 ** (-session.params.pitchCents / 1200),
+  );
+
+  function shownHz(key: TuningKey): number {
+    return key === 'trackHz' ? songHz : session.params.tuning.instrumentHz;
+  }
+
+  /** Whole Hz when it is one; otherwise one decimal (≈4 ¢ at A4). */
+  function formatHz(hz: number): string {
+    const rounded = Math.round(hz);
+    return Math.abs(hz - rounded) < 0.05 ? String(rounded) : hz.toFixed(1);
+  }
+
   function setTuning(key: TuningKey, hz: number) {
-    session.patchParams({ tuning: { ...session.params.tuning, [key]: hz } });
+    if (key === 'trackHz') {
+      // Typing/stepping the song's tuning is absolute: fold the fine-tune in.
+      session.patchParams({
+        tuning: { ...session.params.tuning, trackHz: hz },
+        pitchCents: 0,
+      });
+    } else {
+      session.patchParams({ tuning: { ...session.params.tuning, instrumentHz: hz } });
+    }
+  }
+
+  function stepHz(key: TuningKey, delta: number) {
+    setTuning(key, Math.round(shownHz(key)) + delta);
   }
 
   function onHzChange(
@@ -74,7 +105,7 @@
   ) {
     const n = Number(event.currentTarget.value);
     if (Number.isFinite(n) && n > 0) setTuning(key, Math.round(n));
-    event.currentTarget.value = String(session.params.tuning[key]);
+    event.currentTarget.value = formatHz(shownHz(key));
   }
 </script>
 
@@ -89,6 +120,7 @@
     hint="Detect the song's tuning and correct it to your reference"
     noResult={session.tuningNoResult}
     noResultHint="No clear tuning found — try a more melodic section"
+    result={session.tuningResult != null ? `${session.tuningResult} Hz` : null}
     onclick={() => session.detectTuning()}
   />
 {/snippet}
@@ -105,15 +137,15 @@
           direction={-1}
           disabled={!enabled || blocked}
           label="Decrease {row.name} tuning"
-          onstep={() => setTuning(row.key, session.params.tuning[row.key] - 1)}
+          onstep={() => stepHz(row.key, -1)}
         />
         <input
           class="num-input"
           type="text"
-          inputmode="numeric"
+          inputmode="decimal"
           disabled={!enabled || blocked}
           aria-label="{row.name} tuning in Hz"
-          value={session.params.tuning[row.key]}
+          value={formatHz(shownHz(row.key))}
           onchange={(e) => onHzChange(row.key, e)}
           {@attach tooltip(row.hint)}
         />
@@ -122,7 +154,7 @@
           direction={1}
           disabled={!enabled || blocked}
           label="Increase {row.name} tuning"
-          onstep={() => setTuning(row.key, session.params.tuning[row.key] + 1)}
+          onstep={() => stepHz(row.key, 1)}
         />
       </div>
     {/each}

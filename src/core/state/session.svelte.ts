@@ -45,6 +45,8 @@ class SessionStore {
   tuningDetecting = $state(false);
   /** Briefly true after a tuning run that found nothing pitched (drives the hint). */
   tuningNoResult = $state(false);
+  /** The A4 a successful run just measured, shown on the button for a moment. */
+  tuningResult = $state<number | null>(null);
   #tuningHintTimer: ReturnType<typeof setTimeout> | undefined;
   /** True between a source swap (SPA navigation) and the next media info:
    * the mirrored duration/markers/snippets belong to the OLD track, so seeks
@@ -95,6 +97,7 @@ class SessionStore {
     this.bpmNoResult = false;
     this.tuningDetecting = false;
     this.tuningNoResult = false;
+    this.tuningResult = null;
     this.#dspBlocked = false;
     clearTimeout(this.#bpmHintTimer);
     clearTimeout(this.#tuningHintTimer);
@@ -194,11 +197,20 @@ class SessionStore {
         this.tuningDetecting = event.detecting;
         if (event.detecting) {
           this.tuningNoResult = false;
+          this.tuningResult = null;
           clearTimeout(this.#tuningHintTimer);
         } else if (event.hz != null) {
           // Store the measured A4 through the user-param path so it persists
-          // per-track (like a manual entry).
-          this.patchParams({ tuning: { ...this.params.tuning, trackHz: event.hz } });
+          // per-track (like a manual entry). Any fine-tune the user had dialled
+          // in was a guess at this very offset — the measurement replaces it.
+          this.patchParams({
+            tuning: { ...this.params.tuning, trackHz: event.hz },
+            pitchCents: 0,
+          });
+          // Flash the measured value on the button for a moment.
+          this.tuningResult = event.hz;
+          clearTimeout(this.#tuningHintTimer);
+          this.#tuningHintTimer = setTimeout(() => (this.tuningResult = null), 1500);
         } else {
           // Finished without anything pitched to measure — flash a brief hint.
           this.tuningNoResult = true;

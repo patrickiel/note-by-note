@@ -14,6 +14,9 @@
     hint,
     noResult = false,
     noResultHint,
+    /** Shown in place of the label for a moment after a successful run
+     * (e.g. "432 Hz"); null/undefined shows the label. */
+    result = null,
     onclick,
   }: {
     detecting: boolean;
@@ -23,6 +26,7 @@
     hint: string;
     noResult?: boolean;
     noResultHint: string;
+    result?: string | null;
     onclick: () => void;
   } = $props();
 </script>
@@ -35,7 +39,9 @@
       ? 'detecting text-accent-ink border-accent-line bg-accent-softer'
       : noResult
         ? 'text-danger border-danger ghost'
-        : 'text-muted border-line-strong ghost active:not-disabled:bg-inset active:not-disabled:text-accent',
+        : result != null
+          ? 'text-accent-ink border-accent-line bg-accent-softer'
+          : 'text-muted border-line-strong ghost active:not-disabled:bg-inset active:not-disabled:text-accent',
   ]}
   aria-label={detecting ? `Detecting ${subject}` : `Detect ${subject}`}
   aria-busy={detecting}
@@ -48,10 +54,15 @@
        fruitless run it reads FAILED for a few seconds with the hint in the
        tooltip. Both texts are laid out invisibly in the same grid cell so the
        button is always as wide as the longer one and never shifts. -->
-  <span class="detect-label grid" role={noResult ? 'status' : undefined}>
+  <span class="detect-label grid" role={noResult || result != null ? 'status' : undefined}>
     <span class="col-start-1 row-start-1 invisible" aria-hidden="true">{label}</span>
     <span class="col-start-1 row-start-1 invisible" aria-hidden="true">FAILED</span>
-    <span class="col-start-1 row-start-1">{noResult ? 'FAILED' : label}</span>
+    {#if result != null}
+      <span class="col-start-1 row-start-1 invisible" aria-hidden="true">{result}</span>
+    {/if}
+    <span class="col-start-1 row-start-1 whitespace-nowrap">
+      {noResult ? 'FAILED' : result ?? label}
+    </span>
   </span>
   {#if detecting}
     <span class="eq" aria-hidden="true">
