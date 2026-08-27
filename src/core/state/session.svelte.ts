@@ -191,11 +191,6 @@ class SessionStore {
         }
         break;
       case 'tuning':
-        console.debug('[note-by-note] tuning: panel received', {
-          detecting: event.detecting,
-          hz: event.hz,
-          before: { ...this.params.tuning },
-        });
         this.tuningDetecting = event.detecting;
         if (event.detecting) {
           this.tuningNoResult = false;
@@ -311,11 +306,6 @@ class SessionStore {
   /** Ask the engine to measure the song's reference A4 and set
    * `tuning.trackHz`. The engine replies with 'tuning' events (see apply). */
   detectTuning() {
-    console.debug('[note-by-note] tuning: detect requested', {
-      connection: this.connection,
-      playing: this.playing,
-      engineAttached: this.connected,
-    });
     this.send({ type: 'detectTuning' });
   }
 

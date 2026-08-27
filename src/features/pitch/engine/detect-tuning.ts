@@ -209,8 +209,6 @@ export function estimateTuningFromSpectra(
 export interface CollectOptions {
   /** How long to listen, in ms. */
   durationMs?: number;
-  /** Called once per captured spectrum (diagnostics). */
-  onFrame?: (info: { index: number; atMs: number; loudestDb: number }) => void;
 }
 
 /** Long window → ~1.5 Hz bins at 48 kHz; the parabolic refinement gets well
@@ -229,7 +227,7 @@ export async function detectTuningFromAnalyser(
   opts: TuningOptions & CollectOptions = {},
   shouldAbort?: () => boolean,
 ): Promise<TuningEstimate> {
-  const { durationMs = 4000, onFrame, ...tuningOpts } = opts;
+  const { durationMs = 4000, ...tuningOpts } = opts;
   const ctx = tap.context;
   const hires = ctx.createAnalyser();
   hires.fftSize = TUNING_FFT_SIZE;
@@ -253,11 +251,6 @@ export async function detectTuningFromAnalyser(
         }
         hires.getFloatFrequencyData(buf);
         spectra.push(buf.slice());
-        if (onFrame) {
-          let loudestDb = -Infinity;
-          for (let k = 0; k < buf.length; k++) if (buf[k] > loudestDb) loudestDb = buf[k];
-          onFrame({ index: spectra.length - 1, atMs: performance.now() - t0, loudestDb });
-        }
         if (performance.now() - t0 >= durationMs) {
           resolve();
           return;

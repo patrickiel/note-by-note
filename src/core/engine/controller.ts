@@ -5,7 +5,7 @@
 // the controller.
 import { attachAudio } from '@/core/engine/attach-audio';
 import { detectBpmFromAnalyser } from '@/features/speed/engine/detect-bpm';
-import { detectTuningFromAnalyser, TUNING_FFT_SIZE } from '@/features/pitch/engine/detect-tuning';
+import { detectTuningFromAnalyser } from '@/features/pitch/engine/detect-tuning';
 import type { PcmTap } from '@/features/chords/engine/pcm-tap';
 import type { AudioPipeline } from '@/core/audio/pipeline';
 import {
@@ -440,51 +440,29 @@ export class Controller {
     }
     this.#detectingTuning = true;
     this.broadcast({ type: 'tuning', detecting: true, hz: null });
-    const t0 = performance.now();
-    const pipeline = this.#pipeline;
-    console.debug('[note-by-note] tuning: detect start', {
-      sampleRate: pipeline.ctx.sampleRate,
-      fftSize: TUNING_FFT_SIZE,
-      durationMs: 4000,
-      playbackRate: engine.el.playbackRate,
-      mediaTime: Number(engine.el.currentTime.toFixed(2)),
-      currentTuning: { ...engine.params.tuning },
-    });
     let hz: number | null = null;
     try {
       const est = await detectTuningFromAnalyser(
-        pipeline.analyser,
-        {
-          durationMs: 4000,
-          onFrame: ({ index, atMs, loudestDb }) =>
-            console.debug(
-              `[note-by-note] tuning: frame ${index} at ${atMs.toFixed(0)} ms, loudest ${loudestDb.toFixed(1)} dB`,
-            ),
-        },
+        this.#pipeline.analyser,
+        { durationMs: 4000 },
         () => this.#abortDetect(engine),
       );
       const aborted = this.#abortDetect(engine);
       const d = est.details;
+      // One line per run: enough to tell a weak signal from a refused one.
       console.debug('[note-by-note] tuning: estimate', {
         hz: est.hz,
         confidence: Number(est.confidence.toFixed(3)),
-        accepted: d.accepted,
         aborted,
-        frames: `${d.usedFrames}/${d.frames} used`,
+        frames: `${d.usedFrames}/${d.frames}`,
         devCents: Number(d.devCents.toFixed(1)),
-        peakCents: d.peakCents,
         runnerUpCents: d.runnerUpCents,
-        peakScore: Number(d.peakScore.toFixed(1)),
-        meanScore: Number(d.meanScore.toFixed(1)),
-        runnerUpScore: Number(d.runnerUpScore.toFixed(1)),
-        elapsedMs: Math.round(performance.now() - t0),
       });
       if (est.hz != null && !aborted) hz = est.hz;
     } catch (err) {
       console.warn('[note-by-note] tuning: detection failed', err);
     } finally {
       this.#detectingTuning = false;
-      console.debug('[note-by-note] tuning: result', { hz });
       this.broadcast({ type: 'tuning', detecting: false, hz });
     }
   }
