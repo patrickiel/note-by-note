@@ -51,7 +51,7 @@ const server = createServer((req, res) => {
         '/stereo-mix.wav',
       ),
     );
-  } else if (url.pathname === '/tone-440.wav' || url.pathname === '/stereo-mix.wav') {
+  } else if (/^\/(tone-440|tone-432|stereo-mix)\.wav$/.test(url.pathname)) {
     const wav = readFileSync(join(dir, 'fixtures', url.pathname.slice(1)));
     const range = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range ?? '');
     if (range) {
@@ -124,6 +124,11 @@ try {
 
   // Open the media page.
   const mediaPage = await browser.newPage();
+  mediaPage.on('console', (msg) => {
+    if (msg.type() === 'error' || msg.text().includes('note-by-note')) {
+      console.log(`media console [${msg.type()}]`, msg.text());
+    }
+  });
   await mediaPage.goto(`http://localhost:${PORT}/test-page.html`);
 
   // Resolve its tabId via the background SW.
@@ -192,6 +197,37 @@ try {
     Math.abs(basePitch - 440) < 15,
     `${basePitch?.toFixed(1)} Hz`,
   );
+
+  // ── Reference-tuning detection: swap in a 432 Hz tone, DETECT → trackHz 432,
+  // and the correction to the (440) target must lift the output back to 440. ──
+  await probe(`(() => { const el = document.getElementById('player'); el.src = '/tone-432.wav'; return el.play().catch(() => {}); })()`);
+  await new Promise((r) => setTimeout(r, 2500));
+  const detuned = await probe('window.__noteByNoteDebug.outputPitch()');
+  check('432 Hz tone playing', Math.abs(detuned - 432) < 6, `${detuned?.toFixed(1)} Hz`);
+  await panelPage.bringToFront();
+  const pitchExpand = await panelPage.$('section[aria-label="Pitch"] button[aria-label="Expand"]');
+  if (pitchExpand) await pitchExpand.click();
+  await new Promise((r) => setTimeout(r, 300));
+  const detectTuning = await panelPage.$('section[aria-label="Pitch"] button[aria-label="Detect song tuning"]');
+  check('tuning DETECT button found', !!detectTuning);
+  if (detectTuning) {
+    const enabledBtn = await detectTuning.evaluate((el) => !el.disabled);
+    check('tuning DETECT enabled while playing', enabledBtn);
+    await detectTuning.click();
+    await new Promise((r) => setTimeout(r, 6000));
+    const tuning = (await probe('window.__noteByNoteDebug.params()'))?.tuning;
+    check('detected song tuning = 432 Hz', tuning?.trackHz === 432, JSON.stringify(tuning));
+    const corrected = await probe('window.__noteByNoteDebug.outputPitch()');
+    check('tuning correction lifts output to ≈ 440 Hz', Math.abs(corrected - 440) < 6, `${corrected?.toFixed(1)} Hz`);
+    const pitchReset = await panelPage.$('section[aria-label="Pitch"] button[aria-label="Reset Pitch"]');
+    check('pitch reset button shown', !!pitchReset);
+    if (pitchReset) await pitchReset.click();
+  }
+  // Back to the 440 Hz track for the remaining checks.
+  await probe(`(() => { const el = document.getElementById('player'); el.src = '/tone-440.wav'; return el.play().catch(() => {}); })()`);
+  await new Promise((r) => setTimeout(r, 2500));
+  const restored = await probe('window.__noteByNoteDebug.outputPitch()');
+  check('440 Hz tone restored', Math.abs(restored - 440) < 6, `${restored?.toFixed(1)} Hz`);
 
   // ── Transpose +12 via the side panel UI (stepper hold not needed: click 12×) ──
   await panelPage.bringToFront();

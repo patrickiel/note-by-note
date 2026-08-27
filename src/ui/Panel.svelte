@@ -21,6 +21,7 @@
     enabled,
     onenabledchange,
     header,
+    actions,
     children,
     details,
     grouped = false,
@@ -39,6 +40,9 @@
     onenabledchange?: (enabled: boolean) => void;
     /** Optional richer header content rendered after the title. */
     header?: Snippet;
+    /** Right-aligned header controls, rendered just before the chevron —
+     * always visible, even while the details are collapsed. */
+    actions?: Snippet;
     /** Always-visible content below the header. */
     children?: Snippet;
     /** Collapsible content below `children`; its presence adds the chevron. */
@@ -102,6 +106,11 @@
       {@render header()}
     {/if}
     <span class="flex items-center gap-1 ml-auto text-muted">
+      {#if actions && enabled !== false}
+        <span class="flex items-center mr-1">
+          {@render actions()}
+        </span>
+      {/if}
       {#if details && enabled !== false}
         <button
           type="button"

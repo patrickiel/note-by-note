@@ -1,14 +1,16 @@
-// Generates a 30s 440 Hz sine WAV used by the E2E test page.
+// Generates the 30s sine WAVs used by the E2E test page: tone-440.wav (the
+// main track) and tone-432.wav (a detuned copy for reference-tuning detection).
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const dir = dirname(fileURLToPath(import.meta.url));
-const out = resolve(dir, 'fixtures', 'tone-440.wav');
 
+for (const freq of [440, 432]) writeTone(freq, resolve(dir, 'fixtures', `tone-${freq}.wav`));
+
+function writeTone(freq, out) {
 const sampleRate = 44100;
 const seconds = 30;
-const freq = 440;
 const samples = sampleRate * seconds;
 const dataSize = samples * 2;
 const buf = Buffer.alloc(44 + dataSize);
@@ -35,3 +37,4 @@ for (let i = 0; i < samples; i++) {
 mkdirSync(dirname(out), { recursive: true });
 writeFileSync(out, buf);
 console.log(`wrote ${out}`);
+}

@@ -21,7 +21,7 @@ export interface EffectParams {
    * the backing. Both use the same amount slider. */
   vocalMode: 'reduce' | 'isolate';
   eq: { enabled: boolean; gains: number[] };
-  /** Reference tuning: recording's and instrument's A4 in Hz. */
+  /** Reference tuning: the song's A4 (detectable) and the A4 to change it to, in Hz. */
   tuning: { trackHz: number; instrumentHz: number };
   /** false = processing bypass (Power toggle). */
   power: boolean;

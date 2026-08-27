@@ -2,6 +2,7 @@
   import Panel from '@/ui/Panel.svelte';
   import SliderRow from '@/ui/SliderRow.svelte';
   import Stepper from '@/ui/shared/Stepper.svelte';
+  import DetectButton from '@/ui/shared/DetectButton.svelte';
   import { tooltip } from '@/ui/shared/tooltip.svelte';
   import { DEFAULT_PARAMS, PITCH_CENTS_RANGE } from '@/core/model/defaults';
   import { centsToHz } from '@/core/model/format';
@@ -12,9 +13,15 @@
 
   type TuningKey = 'trackHz' | 'instrumentHz';
 
-  const ROWS: { key: TuningKey; label: string }[] = [
-    { key: 'trackHz', label: 'Track' },
-    { key: 'instrumentHz', label: 'Instrument' },
+  /** `name` is the accessible/tooltip noun ("Song tuning in Hz"). */
+  const ROWS: { key: TuningKey; label: string; name: string; hint: string }[] = [
+    { key: 'trackHz', label: 'Song', name: 'Song', hint: "The song's reference A4 in Hz" },
+    {
+      key: 'instrumentHz',
+      label: 'Change to',
+      name: 'Target',
+      hint: 'Reference A4 in Hz to change the song to',
+    },
   ];
 
   const RESET_KEYS = ['pitchCents', 'tuning'] as const;
@@ -24,14 +31,72 @@
   // Pitch shifting lives in the DSP chain, so it's inert when that never attached.
   let blocked = $derived(!session.dspAvailable);
 
-  let readout = $derived(
-    settings.current.pitchDisplay === 'hz'
-      ? `${centsToHz(session.params.pitchCents, 440).toFixed(1)} Hz`
-      : String(session.params.pitchCents),
+  // Auto-detect is only meaningful where the engine owns the audio pipeline
+  // (direct pages, local files) and something is playing.
+  let canDetect = $derived(
+    !session.tuningDetecting &&
+      session.playing &&
+      (session.connection === 'connected-direct' ||
+        session.connection === 'local-file'),
   );
 
+  // The reference-tuning correction, in cents (what the engine adds on top of
+  // the fine-tune — see netSemitones). The slider shows the SUM so a detected
+  // tuning visibly moves it; dragging still edits the fine-tune underneath,
+  // which the Song row then reflects (see songHz).
+  let tuningCents = $derived(
+    Math.round(
+      1200 * Math.log2(session.params.tuning.instrumentHz / session.params.tuning.trackHz),
+    ),
+  );
+  let effectiveCents = $derived(session.params.pitchCents + tuningCents);
+
+  let readout = $derived(
+    settings.current.pitchDisplay === 'hz'
+      ? `${centsToHz(effectiveCents, 440).toFixed(1)} Hz`
+      : String(effectiveCents),
+  );
+
+  function onSliderChange(effective: number) {
+    const cents = Math.max(
+      -PITCH_CENTS_RANGE,
+      Math.min(PITCH_CENTS_RANGE, Math.round(effective - tuningCents)),
+    );
+    session.patchParams({ pitchCents: cents });
+  }
+
+  // "Change to" is the user's instrument — fixed. A manual pitch change is
+  // therefore a statement about the SONG ("it's really at 430"), so the Song
+  // row shows the stored value moved by the fine-tune: slider drags, the ±
+  // steppers and the shortcuts all visibly move it, and the target stays put.
+  let songHz = $derived(
+    session.params.tuning.trackHz * 2 ** (-session.params.pitchCents / 1200),
+  );
+
+  function shownHz(key: TuningKey): number {
+    return key === 'trackHz' ? songHz : session.params.tuning.instrumentHz;
+  }
+
+  /** Whole Hz when it is one; otherwise one decimal (≈4 ¢ at A4). */
+  function formatHz(hz: number): string {
+    const rounded = Math.round(hz);
+    return Math.abs(hz - rounded) < 0.05 ? String(rounded) : hz.toFixed(1);
+  }
+
   function setTuning(key: TuningKey, hz: number) {
-    session.patchParams({ tuning: { ...session.params.tuning, [key]: hz } });
+    if (key === 'trackHz') {
+      // Typing/stepping the song's tuning is absolute: fold the fine-tune in.
+      session.patchParams({
+        tuning: { ...session.params.tuning, trackHz: hz },
+        pitchCents: 0,
+      });
+    } else {
+      session.patchParams({ tuning: { ...session.params.tuning, instrumentHz: hz } });
+    }
+  }
+
+  function stepHz(key: TuningKey, delta: number) {
+    setTuning(key, Math.round(shownHz(key)) + delta);
   }
 
   function onHzChange(
@@ -40,9 +105,25 @@
   ) {
     const n = Number(event.currentTarget.value);
     if (Number.isFinite(n) && n > 0) setTuning(key, Math.round(n));
-    event.currentTarget.value = String(session.params.tuning[key]);
+    event.currentTarget.value = formatHz(shownHz(key));
   }
 </script>
+
+{#snippet headerActions()}
+  <!-- Lives in the header (left of the chevron) so the song's tuning can be
+       measured without expanding the reference-tuning section. -->
+  <DetectButton
+    detecting={session.tuningDetecting}
+    disabled={!canDetect || !enabled || blocked}
+    label="TUNE"
+    subject="song tuning"
+    hint="Detect the song's tuning and correct it to your reference"
+    noResult={session.tuningNoResult}
+    noResultHint="No clear tuning found — try a more melodic section"
+    result={session.tuningResult != null ? `${session.tuningResult} Hz` : null}
+    onclick={() => session.detectTuning()}
+  />
+{/snippet}
 
 {#snippet tuningSection()}
   <div class="border-t border-dashed border-line pt-2.5">
@@ -55,25 +136,25 @@
         <Stepper
           direction={-1}
           disabled={!enabled || blocked}
-          label="Decrease {row.label} tuning"
-          onstep={() => setTuning(row.key, session.params.tuning[row.key] - 1)}
+          label="Decrease {row.name} tuning"
+          onstep={() => stepHz(row.key, -1)}
         />
         <input
           class="num-input"
           type="text"
-          inputmode="numeric"
+          inputmode="decimal"
           disabled={!enabled || blocked}
-          aria-label="{row.label} tuning in Hz"
-          value={session.params.tuning[row.key]}
+          aria-label="{row.name} tuning in Hz"
+          value={formatHz(shownHz(row.key))}
           onchange={(e) => onHzChange(row.key, e)}
-          {@attach tooltip(`${row.label} reference A4 in Hz`)}
+          {@attach tooltip(row.hint)}
         />
         <span class="text-[10.5px] text-faint font-mono">Hz</span>
         <Stepper
           direction={1}
           disabled={!enabled || blocked}
-          label="Increase {row.label} tuning"
-          onstep={() => setTuning(row.key, session.params.tuning[row.key] + 1)}
+          label="Increase {row.name} tuning"
+          onstep={() => stepHz(row.key, 1)}
         />
       </div>
     {/each}
@@ -89,18 +170,21 @@
   onenabledchange={(on) => session.patchParams({ pitchEnabled: on })}
   onreset={() => session.resetParam([...RESET_KEYS])}
   resettable={dirty}
+  actions={headerActions}
   details={tuningSection}
 >
+  <!-- Slider shows fine-tune + tuning correction; its double-click default is
+       the bare tuning correction (i.e. fine-tune back to 0, tuning kept). -->
   <SliderRow
-    value={session.params.pitchCents}
+    value={effectiveCents}
     min={-PITCH_CENTS_RANGE}
     max={PITCH_CENTS_RANGE}
     step={1}
-    defaultValue={DEFAULT_PARAMS.pitchCents}
+    defaultValue={DEFAULT_PARAMS.pitchCents + tuningCents}
     disabled={!enabled || blocked}
     label="Pitch (cents)"
     downAction="pitchDown"
     upAction="pitchUp"
-    onchange={(v) => session.patchParams({ pitchCents: v })}
+    onchange={onSliderChange}
   />
 </Panel>

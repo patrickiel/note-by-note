@@ -41,6 +41,13 @@ class SessionStore {
   /** Briefly true after a detection run that found no tempo (drives the hint). */
   bpmNoResult = $state(false);
   #bpmHintTimer: ReturnType<typeof setTimeout> | undefined;
+  /** True while the engine is measuring the reference tuning (DETECT spinner). */
+  tuningDetecting = $state(false);
+  /** Briefly true after a tuning run that found nothing pitched (drives the hint). */
+  tuningNoResult = $state(false);
+  /** The A4 a successful run just measured, shown on the button for a moment. */
+  tuningResult = $state<number | null>(null);
+  #tuningHintTimer: ReturnType<typeof setTimeout> | undefined;
   /** True between a source swap (SPA navigation) and the next media info:
    * the mirrored duration/markers/snippets belong to the OLD track, so seeks
    * issued from them would land on the new video at meaningless positions. */
@@ -88,8 +95,12 @@ class SessionStore {
     this.countIn = null;
     this.bpmDetecting = false;
     this.bpmNoResult = false;
+    this.tuningDetecting = false;
+    this.tuningNoResult = false;
+    this.tuningResult = null;
     this.#dspBlocked = false;
     clearTimeout(this.#bpmHintTimer);
+    clearTimeout(this.#tuningHintTimer);
     this.onEngineDetached?.();
   }
 
@@ -180,6 +191,31 @@ class SessionStore {
           this.bpmNoResult = true;
           clearTimeout(this.#bpmHintTimer);
           this.#bpmHintTimer = setTimeout(() => (this.bpmNoResult = false), 3000);
+        }
+        break;
+      case 'tuning':
+        this.tuningDetecting = event.detecting;
+        if (event.detecting) {
+          this.tuningNoResult = false;
+          this.tuningResult = null;
+          clearTimeout(this.#tuningHintTimer);
+        } else if (event.hz != null) {
+          // Store the measured A4 through the user-param path so it persists
+          // per-track (like a manual entry). Any fine-tune the user had dialled
+          // in was a guess at this very offset — the measurement replaces it.
+          this.patchParams({
+            tuning: { ...this.params.tuning, trackHz: event.hz },
+            pitchCents: 0,
+          });
+          // Flash the measured value on the button for a moment.
+          this.tuningResult = event.hz;
+          clearTimeout(this.#tuningHintTimer);
+          this.#tuningHintTimer = setTimeout(() => (this.tuningResult = null), 1500);
+        } else {
+          // Finished without anything pitched to measure — flash a brief hint.
+          this.tuningNoResult = true;
+          clearTimeout(this.#tuningHintTimer);
+          this.#tuningHintTimer = setTimeout(() => (this.tuningNoResult = false), 3000);
         }
         break;
       case 'error':
@@ -277,6 +313,12 @@ class SessionStore {
    * replies with 'bpm' events (see apply); no-op with no engine attached. */
   detectBpm() {
     this.send({ type: 'detectBpm' });
+  }
+
+  /** Ask the engine to measure the song's reference A4 and set
+   * `tuning.trackHz`. The engine replies with 'tuning' events (see apply). */
+  detectTuning() {
+    this.send({ type: 'detectTuning' });
   }
 
   /** True when every given param still holds its default value. */
