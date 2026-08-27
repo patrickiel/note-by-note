@@ -78,6 +78,21 @@
   }
 </script>
 
+{#snippet headerActions()}
+  <!-- Lives in the header (left of the chevron) so the song's tuning can be
+       measured without expanding the reference-tuning section. -->
+  <DetectButton
+    detecting={session.tuningDetecting}
+    disabled={!canDetect || !enabled || blocked}
+    label="TUNE"
+    subject="song tuning"
+    hint="Detect the song's tuning and correct it to your reference"
+    noResult={session.tuningNoResult}
+    noResultHint="No clear tuning found — try a more melodic section"
+    onclick={() => session.detectTuning()}
+  />
+{/snippet}
+
 {#snippet tuningSection()}
   <div class="border-t border-dashed border-line pt-2.5">
     <div class="px-0.5 pb-1.5 text-[10.5px] font-bold tracking-widest uppercase text-faint">
@@ -86,17 +101,6 @@
     {#each ROWS as row (row.key)}
       <div class="flex items-center gap-1.5 py-0.75">
         <span class="flex-1 min-w-0 text-muted text-[12.5px]">{row.label}</span>
-        {#if row.key === 'trackHz'}
-          <DetectButton
-            detecting={session.tuningDetecting}
-            disabled={!canDetect || !enabled || blocked}
-            subject="song tuning"
-            hint="Measure the song's reference tuning from the playing audio"
-            noResult={session.tuningNoResult}
-            noResultHint="Couldn't detect a tuning — try a clearer, more melodic section"
-            onclick={() => session.detectTuning()}
-          />
-        {/if}
         <Stepper
           direction={-1}
           disabled={!enabled || blocked}
@@ -134,6 +138,7 @@
   onenabledchange={(on) => session.patchParams({ pitchEnabled: on })}
   onreset={() => session.resetParam([...RESET_KEYS])}
   resettable={dirty}
+  actions={headerActions}
   details={tuningSection}
 >
   <!-- Slider shows fine-tune + tuning correction; its double-click default is

@@ -7,6 +7,8 @@
   let {
     detecting,
     disabled = false,
+    /** Visible label. Short and monospace-uppercase like the rest of the strip. */
+    label = 'DETECT',
     /** What is being measured, for the accessible name ("Detect tempo"). */
     subject,
     hint,
@@ -16,6 +18,7 @@
   }: {
     detecting: boolean;
     disabled?: boolean;
+    label?: string;
     subject: string;
     hint: string;
     noResult?: boolean;
@@ -42,10 +45,13 @@
 >
   <!-- The label stays in the DOM (hidden while detecting) so the button
        keeps a constant width; the meter overlays it in fixed columns. After a
-       fruitless run it reads FAILED for a few seconds — same six monospace
-       glyphs, so nothing shifts — with the hint in the tooltip. -->
-  <span class="detect-label" role={noResult ? 'status' : undefined}>
-    {noResult ? 'FAILED' : 'DETECT'}
+       fruitless run it reads FAILED for a few seconds with the hint in the
+       tooltip. Both texts are laid out invisibly in the same grid cell so the
+       button is always as wide as the longer one and never shifts. -->
+  <span class="detect-label grid" role={noResult ? 'status' : undefined}>
+    <span class="col-start-1 row-start-1 invisible" aria-hidden="true">{label}</span>
+    <span class="col-start-1 row-start-1 invisible" aria-hidden="true">FAILED</span>
+    <span class="col-start-1 row-start-1">{noResult ? 'FAILED' : label}</span>
   </span>
   {#if detecting}
     <span class="eq" aria-hidden="true">
