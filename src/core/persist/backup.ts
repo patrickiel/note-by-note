@@ -11,7 +11,7 @@ import {
   eqPresetsItem,
   favoritesItem,
   historyItem,
-  removeAllTrackData,
+  removeTrackDataExcept,
   saveTrackData,
   settingsItem,
   uiPrefsItem,
@@ -85,13 +85,19 @@ export function parseBackup(text: string): Backup {
  * Deletion records are the one thing merged, not replaced: forgetting this
  * device's would let a sync merge resurrect what it had removed. Manual file
  * imports use `asNew` to re-add their contents; sync restores keep their dates.
+ *
+ * Track records are written first and the leftovers removed afterwards, never
+ * the other way round. A sync merge calls this on every remote change, and
+ * the panel document can go away mid-restore (the user closes it, the tab
+ * changes) — wiping first would make that window cost every marker, snippet
+ * and chart in the library. This way the worst case is a stale record the
+ * next restore removes.
  */
 export async function restoreBackup(backup: Backup, { asNew = false } = {}): Promise<void> {
   const deletions = pruneDeletions(
     mergeDeletions(await deletionsItem.getValue(), backup.deletions ?? {}), Date.now(),
   );
   if (asNew) backup = reviveBackup(backup, deletions);
-  await removeAllTrackData();
   await Promise.all([
     settingsItem.setValue(backup.settings),
     uiPrefsItem.setValue(backup.uiPrefs),
@@ -101,4 +107,5 @@ export async function restoreBackup(backup: Backup, { asNew = false } = {}): Pro
     deletionsItem.setValue(deletions),
     ...backup.tracks.map(saveTrackData),
   ]);
+  await removeTrackDataExcept(new Set(backup.tracks.map((t) => t.identity.key)));
 }

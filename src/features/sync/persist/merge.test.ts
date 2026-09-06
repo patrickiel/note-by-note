@@ -100,6 +100,20 @@ test('history is newest-first and capped', () => {
   assert.equal(merged.history[0].identity.key, song(999).key);
 });
 
+test('the history cap never drops a favorited song’s row', () => {
+  const old = song(1);
+  const local = backup({
+    favorites: [fav(old, T0)],
+    history: [
+      row(old, T0),
+      ...Array.from({ length: HISTORY_LIMIT }, (_, i) => row(song(i + 2), T0 + 1000 + i)),
+    ],
+  });
+  const merged = mergeBackups(local, backup({}), false, NOW);
+  assert.equal(merged.history.length, HISTORY_LIMIT, 'a plain row went instead');
+  assert.ok(keys(merged.history).includes(old.key));
+});
+
 test('favorites: union in the winner order, deletions honoured, last access kept', () => {
   const a = song(1);
   const b = song(2);
@@ -113,6 +127,19 @@ test('favorites: union in the winner order, deletions honoured, last access kept
   assert.deepEqual(keys(merged.favorites), [a.key, b.key], 'remote order first, c deleted');
   assert.equal(merged.favorites[0].updatedAt, T0 + 1);
   assert.equal(merged.favorites[1].lastAccessedAt, T0 + 9000);
+});
+
+test('favorites: practice on the other device does not undo an unfavorite', () => {
+  const a = song(1);
+  // Starred long ago, unfavorited here; the other device then played it and
+  // moved a slider, which bumps `updatedAt` but not `favoritedAt`.
+  const local = backup({ deletions: { [favoriteDeletion(songKey(a))]: T0 + 5000 } });
+  const practised: FavoriteEntry = { ...fav(a, T0), updatedAt: T0 + 9000 };
+  const remote = backup({ favorites: [practised] });
+  assert.deepEqual(keys(mergeBackups(local, remote, true, NOW).favorites), []);
+  // Genuinely starring it again does beat the record.
+  const restarred = backup({ favorites: [fav(a, T0 + 6000)] });
+  assert.deepEqual(keys(mergeBackups(local, restarred, true, NOW).favorites), [a.key]);
 });
 
 test('favorites: a newer copy adopts the other side’s later access time', () => {

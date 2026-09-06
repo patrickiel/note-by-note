@@ -72,7 +72,9 @@ export function reviveBackup(backup: Backup, deletions: Deletions, now = Date.no
     ...backup,
     exportedAt: updatedAt,
     history: backup.history.map((e) => ({ ...e, updatedAt })),
-    favorites: backup.favorites.map((e) => ({ ...e, updatedAt })),
+    // `favoritedAt` too: it is what the merge dates a favorite by, so leaving
+    // it behind would let a deletion record outrank the star we just re-added.
+    favorites: backup.favorites.map((e) => ({ ...e, updatedAt, favoritedAt: updatedAt })),
     eqPresets: backup.eqPresets.map((e) => ({ ...e, updatedAt })),
     tracks: backup.tracks.map((t) => ({
       ...t,

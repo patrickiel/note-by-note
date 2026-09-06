@@ -94,7 +94,13 @@ class ChordsStore {
     this.#log(`analyze confirmed (${fromStart ? 'from start' : 'from here'}) — loading model`);
     this.phase = 'loading';
     this.loadError = false;
-    this.clear();
+    // Null, not `clear()`: the old chart is being replaced, not deleted, and
+    // the run can still fail (the model load is a download). An empty dated
+    // chart is a deletion that outranks another device's real one, so a
+    // failed run here would wipe the chords everywhere; null just means
+    // "nothing on this device", which the merge fills back in.
+    this.chart = null;
+    this.#persistNow();
     try {
       await this.#ensureEngine().ready();
     } catch (err) {

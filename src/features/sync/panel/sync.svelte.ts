@@ -1,6 +1,7 @@
 import { encodeBackup, isEmptyBackup } from '../../../core/persist/backup-codec';
 import { createBackup, restoreBackup, type Backup } from '../../../core/persist/backup';
 import { session } from '../../../core/state/session.svelte';
+import type { MediaInfo } from '../../../core/model/types';
 import { fitBackup, type FitResult } from '../persist/fit';
 import { contentHash } from '../persist/hash';
 import { mergeBackups } from '../persist/merge';
@@ -140,6 +141,17 @@ class SyncStore {
     await this.#enqueue(() => this.#reconcile(true));
   }
 
+  /** The loaded track changed (wired to `session.onMediaChanged` by the panel
+   * root). A merge held back because applying it would reload the panel
+   * mid-practice has no other cue that its moment has come: without this it
+   * waits for the safety interval, up to five minutes after the track went
+   * away, while this device carries on pushing its own state. */
+  onMedia(media: MediaInfo | null): void {
+    if (media === null && this.pendingApply && this.config.enabled) {
+      this.#reconcileIn(REMOTE_DEBOUNCE_MS);
+    }
+  }
+
   /**
    * Empties the synced copy and turns sync off — left on, the next change
    * would quietly re-upload. Other devices with sync on will re-seed it from
@@ -179,6 +191,18 @@ class SyncStore {
     this.#timer = setTimeout(() => void this.#enqueue(() => this.#reconcile()), delayMs);
   }
 
+  /** Whether a write would come too soon after the last one, scheduling the
+   * retry if so. Asked before the encoding work wherever a push is the only
+   * thing left to do: the debounce is 5 s and the spacing 30 s, so most of a
+   * burst's reconciles have nothing to do but come back later, and gzipping
+   * the whole library to find that out is pure waste on the panel's thread. */
+  #pushTooSoon(): boolean {
+    const wait = this.#lastPushAt + MIN_PUSH_SPACING_MS - Date.now();
+    if (wait <= 0) return false;
+    this.#reconcileIn(wait);
+    return true;
+  }
+
   /**
    * The whole algorithm. Reads the area and this device's data, then:
    *  - nothing there → seed it (unless this device has nothing either);
@@ -197,9 +221,6 @@ class SyncStore {
     try {
       const { result, bytes } = await readSyncArea();
       this.usedBytes = bytes;
-      const local = await createBackup();
-      const localHash = await contentHash(local);
-      const localChanged = localHash !== this.config.lastLocalHash;
 
       if (result.kind === 'torn') {
         if (!this.#tornSince) this.#tornSince = Date.now();
@@ -209,23 +230,43 @@ class SyncStore {
         }
         // Nobody finished that write; ours replaces it. Whatever it carried
         // comes back merged when its writer reconciles against ours.
-        this.#tornSince = 0;
-        await this.#push(await fit(local), localHash);
-        return;
       }
       this.#tornSince = 0;
 
+      // When there is nothing new from another device, a push is the only
+      // thing this reconcile could do — and if the spacing says not yet, it
+      // need not read and encode the whole library to find that out. The
+      // debounce is 5 s against a 30 s spacing, so during a burst of edits
+      // that is most reconciles.
+      const pushIsAllThatIsLeft =
+        result.kind === 'torn' ||
+        (this.config.pendingPush &&
+          (result.kind === 'none' || result.meta.h === this.config.lastRemoteHash));
+      if (pushIsAllThatIsLeft && this.#pushTooSoon()) return;
+
+      const local = await createBackup();
+      const localHash = await contentHash(local);
+      const localChanged = localHash !== this.config.lastLocalHash;
+
+      if (result.kind === 'torn') {
+        if (!this.#pushTooSoon()) await this.#push(await fit(local), localHash);
+        return;
+      }
+
       if (result.kind === 'none') {
         if (isEmptyBackup(local) && !this.config.pendingPush) return;
-        await this.#push(await fit(local), localHash);
+        if (!this.#pushTooSoon()) await this.#push(await fit(local), localHash);
         return;
       }
 
       const { meta, base64 } = result;
       if (meta.h === this.config.lastRemoteHash) {
         // Remote is what we last saw (our own echo included).
-        if (localChanged || this.config.pendingPush) await this.#push(await fit(local), localHash);
-        else if (this.config.lastError) await this.#saveConfig({ lastError: null });
+        if (localChanged || this.config.pendingPush) {
+          if (!this.#pushTooSoon()) await this.#push(await fit(local), localHash);
+        } else if (this.config.lastError) {
+          await this.#saveConfig({ lastError: null });
+        }
         return;
       }
 
@@ -233,28 +274,31 @@ class SyncStore {
       const remote = await unpackBackup(base64);
       const remoteWins = !localChanged || remote.exportedAt > this.config.lastChangedAt;
       const merged = mergeBackups(local, remote, remoteWins);
-      const fitted = await fit(merged);
-      const [mergedHash, remoteHash] = await Promise.all([
-        contentHash(merged),
-        contentHash(remote),
-      ]);
+      const mergedHash = await contentHash(merged);
       const needApply = mergedHash !== localHash;
-      // Push our own edits, or a full copy the remote lacks. Once the merge
-      // is over the quota only our edits count: two devices holding
-      // different old songs would otherwise cut the copy differently and
-      // re-upload each other's cut forever.
-      const needPush =
-        localChanged ||
-        this.config.pendingPush ||
-        (!fitted.trimmed && mergedHash !== remoteHash);
 
       if (needApply && !force && session.media !== null) {
         // A track is loaded; applying would reload the panel mid-practice.
         // Nothing is pushed either: a push now would carry only our side.
+        // Before the fit, so a track left loaded for an hour doesn't gzip the
+        // library on every tick to throw the result away.
         this.pendingApply = true;
         return;
       }
       this.pendingApply = false;
+
+      const fitted = await fit(merged);
+      // Push our own edits, or a full copy the remote lacks. Once the merge
+      // is over the quota only our edits count: two devices holding
+      // different old songs would otherwise cut the copy differently and
+      // re-upload each other's cut forever. The remote's own hash is the
+      // last thing asked for — another full encode, and only the last term
+      // needs it.
+      const needPush =
+        localChanged ||
+        this.config.pendingPush ||
+        (!fitted.trimmed && mergedHash !== (await contentHash(remote)));
+
       if (needApply) {
         // #applying stays set until the reload: nothing in between may
         // schedule a push of what was just written. The reload is owed from
@@ -292,11 +336,7 @@ class SyncStore {
    * `hash` is the content hash of this device's full data, so a trimmed push
    * doesn't read as "local changed" next time. */
   async #push(fitted: FitResult, hash: string) {
-    const wait = this.#lastPushAt + MIN_PUSH_SPACING_MS - Date.now();
-    if (wait > 0) {
-      this.#reconcileIn(wait);
-      return;
-    }
+    if (this.#pushTooSoon()) return;
     const exportedAt = Date.now();
     const packed = await packBackup(
       encodeBackup({ ...fitted.backup, exportedAt }),

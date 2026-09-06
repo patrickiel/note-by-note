@@ -58,6 +58,21 @@ function unionNewest<T extends { updatedAt?: number }>(
 
 const song = (entry: HistoryEntry) => songKey(entry.identity);
 
+/** Newest first, down to `HISTORY_LIMIT` — but only non-favorited rows are
+ * ever dropped. A favorited song whose Recent row went would leave the two
+ * library copies of it disagreeing, which is the drift `upsertHistory` and
+ * `fit.ts` both go out of their way to prevent; a union of two full libraries
+ * is exactly where the cap would otherwise reach one. Over the limit in
+ * favorites alone, the list simply stays long. */
+function capHistory(history: HistoryEntry[], favorites: FavoriteEntry[]): HistoryEntry[] {
+  const ordered = history.sort((a, b) => at(b) - at(a));
+  const excess = ordered.length - HISTORY_LIMIT;
+  if (excess <= 0) return ordered;
+  const favorited = new Set(favorites.map((f) => song(f)));
+  const cut = new Set(ordered.filter((e) => !favorited.has(song(e))).slice(-excess));
+  return ordered.filter((e) => !cut.has(e));
+}
+
 export function mergeBackups(
   local: Backup,
   remote: Backup,
@@ -68,6 +83,20 @@ export function mergeBackups(
   const deletions = pruneDeletions(mergeDeletions(local.deletions ?? {}, remote.deletions ?? {}), now);
   const history = unionNewest(winner.history, loser.history, song, (e) =>
     deletedSince(deletions, at(e), historyDeletion(song(e)), HISTORY_CLEARED),
+  );
+  const favorites = unionNewest(
+    winner.favorites,
+    loser.favorites,
+    song,
+    // Anchored on `favoritedAt` — when the star was put there — not on
+    // `updatedAt`, which ordinary practice bumps (`touchFavorite` with new
+    // params). Taking the later of the two would let a slider nudge on one
+    // device outdate the other's unfavorite and re-star the song.
+    (f) => deletedSince(deletions, f.favoritedAt || at(f), favoriteDeletion(song(f))),
+    (w, l): FavoriteEntry => ({
+      ...w,
+      lastAccessedAt: Math.max(w.lastAccessedAt ?? 0, l.lastAccessedAt ?? 0),
+    }),
   );
   return {
     ...local,
@@ -80,17 +109,8 @@ export function mergeBackups(
       (p) => p.name,
       (p) => deletedSince(deletions, at(p), presetDeletion(p.name)),
     ),
-    history: history.sort((a, b) => at(b) - at(a)).slice(0, HISTORY_LIMIT),
-    favorites: unionNewest(
-      winner.favorites,
-      loser.favorites,
-      song,
-      (f) => deletedSince(deletions, Math.max(f.favoritedAt ?? 0, at(f)), favoriteDeletion(song(f))),
-      (w, l): FavoriteEntry => ({
-        ...w,
-        lastAccessedAt: Math.max(w.lastAccessedAt ?? 0, l.lastAccessedAt ?? 0),
-      }),
-    ),
+    history: capHistory(history, favorites),
+    favorites,
     tracks: unionNewest(
       winner.tracks,
       loser.tracks,

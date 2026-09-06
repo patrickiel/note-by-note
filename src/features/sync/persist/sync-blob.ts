@@ -34,8 +34,13 @@ const BLOB_KEY_RE = /^nbn\.(meta|\d+)$/;
 export const CHUNK_CHARS = 8000;
 export const MAX_CHUNKS = 11;
 /** What `fitBackup` gets as its budget: base64 characters. 11 chunks plus
- * meta come to ~88.3 KB of Chrome's 102,400-byte quota. */
-export const BUDGET_CHARS = CHUNK_CHARS * MAX_CHUNKS;
+ * meta come to ~88.3 KB of Chrome's 102,400-byte quota. The margin is what
+ * keeps `fit` and `packBackup` from disagreeing: the store fits a backup and
+ * packs it later with a fresh `exportedAt`, which gzips to a slightly
+ * different length. Filling the chunks exactly would let that difference
+ * spill into a twelfth chunk and throw where `fit` had just said it fits —
+ * and "too large" is not a retryable error, so sync would stay wedged. */
+export const BUDGET_CHARS = CHUNK_CHARS * MAX_CHUNKS - 512;
 export const SYNC_QUOTA_BYTES = 102_400;
 
 /** Bump when a reader of this version could misread the layout. */

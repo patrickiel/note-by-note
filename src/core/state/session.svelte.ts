@@ -75,6 +75,10 @@ class SessionStore {
 
   /** Persistence hooks (set by track-sync). */
   onMediaEvent: ((media: MediaInfo | null) => void) | null = null;
+  /** Every change to `media`, the connection layer's outright clears
+   * included — where `onMediaEvent` is only the engine's own media messages.
+   * Set by the panel root for whoever needs to know a track went away. */
+  onMediaChanged: ((media: MediaInfo | null) => void) | null = null;
   onUserParamsChange: (() => void) | null = null;
   /** The engine link dropped. Whatever reconnects starts on the default preset,
    * so the track's saved settings have to go back on even if it never changed. */
@@ -84,6 +88,13 @@ class SessionStore {
     params(patch: Partial<EffectParams>): void;
     volume(volume: number): void;
   } | null = null;
+
+  /** The one place `media` is written, so `onMediaChanged` cannot miss a
+   * change: the connection layer clears it on paths that send no event. */
+  setMedia(media: MediaInfo | null) {
+    this.media = media;
+    this.onMediaChanged?.(media);
+  }
 
   attachTransport(send: (cmd: EngineCommand) => void) {
     this.#send = send;
@@ -122,7 +133,7 @@ class SessionStore {
       case 'snapshot':
         this.connection = event.state;
         this.#dspBlocked = !event.dspAvailable;
-        this.media = event.media;
+        this.setMedia(event.media);
         this.params = event.params;
         this.volume = event.volume;
         this.loop = event.loop;
@@ -148,7 +159,7 @@ class SessionStore {
         this.#dspBlocked = !event.available;
         break;
       case 'media':
-        this.media = event.media;
+        this.setMedia(event.media);
         // Zero duration = metadata still loading: keep seeks gated a moment
         // longer (mirrors track-sync's zero-duration grace period).
         if (event.media?.duration) this.#setSourceChanging(false);

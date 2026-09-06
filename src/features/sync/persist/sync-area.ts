@@ -51,9 +51,11 @@ export function onSyncAreaChanged(listener: () => void): void {
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 /** The browser reports write metering as thrown strings/errors with these
- * names in the message; there is no error code to switch on. */
+ * names in the message; there is no error code to switch on. `MAX_ITEMS` is
+ * deliberately not here: it is a hard cap on the area, not metering, so the
+ * caller must not schedule a retry that can only fail the same way. */
 export function isRateLimited(err: unknown): boolean {
-  return /MAX_WRITE_OPERATIONS|MAX_SUSTAINED_WRITE|MAX_ITEMS/i.test(errorText(err));
+  return /MAX_WRITE_OPERATIONS|MAX_SUSTAINED_WRITE/i.test(errorText(err));
 }
 
 /** Our own errors (`NewerVersionError`, `LibraryTooLargeError`) already read
@@ -61,7 +63,7 @@ export function isRateLimited(err: unknown): boolean {
 export function syncErrorMessage(err: unknown): string {
   const text = errorText(err);
   if (isRateLimited(err)) return 'The browser is rate-limiting sync writes — retrying in a minute.';
-  if (/QUOTA_BYTES|QuotaExceeded|quota/i.test(text)) {
+  if (/QUOTA_BYTES|QuotaExceeded|quota|MAX_ITEMS/i.test(text)) {
     return "Your library is too large for the browser's sync storage.";
   }
   return text || 'Sync failed.';

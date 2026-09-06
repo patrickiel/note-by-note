@@ -106,8 +106,15 @@ export async function saveTrackData(data: TrackData): Promise<void> {
   await storage.setItem(trackDataKey(data.identity.key), toPlain(data));
 }
 
-export async function removeAllTrackData(): Promise<void> {
+/** Drops every stored track record whose identity key isn't in `keep` — a
+ * restore replaces the set of records rather than merging into it. Written
+ * as "remove what's left over" (rather than wiping first) so the records are
+ * only ever gone once their replacements are in: a restore interrupted
+ * halfway leaves stale records behind, never an empty library. */
+export async function removeTrackDataExcept(keep: Set<string>): Promise<void> {
   const snapshot = await browser.storage.local.get(null);
-  const keys = Object.keys(snapshot).filter((k) => k.startsWith('track:'));
-  if (keys.length) await browser.storage.local.remove(keys);
+  const stale = Object.keys(snapshot).filter(
+    (k) => k.startsWith('track:') && !keep.has(k.slice('track:'.length)),
+  );
+  if (stale.length) await browser.storage.local.remove(stale);
 }
