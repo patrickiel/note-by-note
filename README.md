@@ -116,8 +116,9 @@ the engine.
 
 ## Tests
 
-`pnpm test:dsp` runs the DSP unit tests under `node --test`: the center-cut
-math, the CQT, chord decoding. Fast, no browser.
+`pnpm test:dsp` runs the unit tests under `node --test`: the center-cut
+math, the CQT, chord decoding, the compact backup codec and the sync
+fit-to-budget logic. Fast, no browser.
 
 The e2e harness is the interesting one. It launches Chrome for Testing with the
 extension installed, plays a 440 Hz tone, and asserts on the *processed output* —

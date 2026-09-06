@@ -18,6 +18,7 @@
     parseBackup,
     restoreBackup,
   } from '@/core/persist/backup';
+  import { encodeBackup } from '@/core/persist/backup-codec';
   import { history } from '@/features/library/panel/history.svelte';
   import { applyTheme, settings } from '@/features/settings/panel/settings.svelte';
   import { session } from '@/core/state/session.svelte';
@@ -136,9 +137,10 @@
     notice = null;
     try {
       const backup = await createBackup();
-      const blob = new Blob([JSON.stringify(backup, null, 2)], {
-        type: 'application/json',
-      });
+      // The compact form — a fraction of the verbose one and the shape that
+      // will ride the browser's sync storage; import reads both.
+      const text = JSON.stringify(encodeBackup(backup));
+      const blob = new Blob([text], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -148,7 +150,8 @@
       // outlive this task.
       setTimeout(() => URL.revokeObjectURL(url), 0);
       const songs = backup.history.length + backup.favorites.length;
-      notice = { ok: true, text: `Saved ${link.download} (${songs} songs).` };
+      const kb = Math.max(1, Math.round(new TextEncoder().encode(text).length / 1024));
+      notice = { ok: true, text: `Saved ${link.download} (${songs} songs, ${kb} KB).` };
     } catch (err) {
       notice = { ok: false, text: `Export failed: ${message(err)}` };
     } finally {

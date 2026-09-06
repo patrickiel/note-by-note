@@ -39,7 +39,7 @@
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
     "check": "svelte-check --tsconfig ./tsconfig.json",
-    "test:dsp": "node --test \"src/features/**/*.test.ts\"",
+    "test:dsp": "node --test \"src/**/*.test.ts\"",
     "test:e2e": "node e2e/run.mjs",
     "release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1",
     "release:dry": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1 -DryRun",
