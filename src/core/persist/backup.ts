@@ -75,12 +75,17 @@ export function parseBackup(text: string): Backup {
  * older file would be undone by the next sync. Recent keeps the file's order
  * through a millisecond stagger. What the restore drops is dated as deleted
  * (see `deletions.ts`), so peers remove it too instead of keeping their
- * copies and bringing them back here. The file's own deletion records come
- * along; this device's old ones do not — the file may carry items they would
- * contradict.
+ * copies and bringing them back here. This device's existing deletion
+ * records stay as well (something deleted here and absent from the file must
+ * not come back from a stale peer); the `now` stamp already outranks them
+ * for anything the file does restore. The file's own records come along too.
  */
 export async function restoreBackup(backup: Backup): Promise<void> {
-  const [oldTracks, oldHistory] = await Promise.all([loadAllTrackData(), historyItem.getValue()]);
+  const [oldTracks, oldHistory, oldDeletions] = await Promise.all([
+    loadAllTrackData(),
+    historyItem.getValue(),
+    deletionsItem.getValue(),
+  ]);
   const now = Date.now();
   const tracks = backup.tracks.map((t) => ({ ...t, updatedAt: now }));
   const history = backup.history.map((h, i) => ({ ...h, updatedAt: now - i }));
@@ -100,7 +105,9 @@ export async function restoreBackup(backup: Backup): Promise<void> {
     historyItem.setValue(history),
     favoritesItem.setValue(backup.favorites),
     eqPresetsItem.setValue(backup.eqPresets),
-    deletionsItem.setValue(pruneDeletions(mergeDeletions(backup.deletions, dropped), now)),
+    deletionsItem.setValue(
+      pruneDeletions(mergeDeletions(mergeDeletions(oldDeletions, backup.deletions), dropped), now),
+    ),
     ...tracks.map(saveTrackData),
   ]);
 }
