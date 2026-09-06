@@ -345,6 +345,15 @@ class SyncStore {
       this.#tornDeadline = 0;
 
       if (read.kind === 'none') {
+        // A fresh install may read the area before the browser has delivered
+        // its contents. With nothing of its own to seed, it waits — the
+        // arrival fires a change event — rather than publish an empty library
+        // an established device would then apply over its own. Anything the
+        // user has done meanwhile (`pendingPush`, settings included) is worth
+        // seeding with.
+        if (this.#isPristine(local) && !this.#config.lastSyncedAt && !this.#config.pendingPush) {
+          return;
+        }
         // Empty area: first device, or the blob was cleared. Seeding it is
         // starting the data set — consent implied.
         if (!this.#config.consented) await this.#saveConfig({ consented: true });
