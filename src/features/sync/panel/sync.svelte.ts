@@ -336,12 +336,7 @@ class SyncStore {
         const stuck = opts.repairTorn || Date.now() >= this.#tornDeadline;
         if (stuck && this.#config.consented) {
           this.#tornDeadline = 0;
-          // Under the clock of this data's last sync or edit, not now: the
-          // re-seed must not win last-write-wins over a device that synced
-          // something newer in the meantime (that device pushes back — see
-          // the `repaired` rule below).
-          local.exportedAt = Math.max(this.#config.lastSyncedAt, this.#config.lastChangedAt);
-          await this.#uploadLocal(local, localHash, await this.#fit(local, true));
+          await this.#reseed(local, localHash);
         } else {
           this.#scheduleRetry(TORN_RETRY_MS);
         }
@@ -364,10 +359,12 @@ class SyncStore {
         return;
       }
       if (remote.repaired && remote.exportedAt < this.#config.lastSyncedAt) {
-        // A device re-seeded a torn area from data older than what we last
-        // synced; ours is the newer copy, so it goes back up (that device
-        // then applies it like any other newer write).
-        await this.#uploadLocal(local, localHash);
+        // A device re-seeded from data older than what we last synced; ours
+        // is newer, so it goes back up — as a re-seed too, under its own
+        // clock, so a third device holding something newer still can answer
+        // the same way. The chain ends at the newest copy, which every other
+        // device then applies like any other newer write.
+        await this.#reseed(local, localHash);
         return;
       }
       // Another device wrote since our last sync. Compare what we *would*
@@ -424,6 +421,16 @@ class SyncStore {
     } finally {
       this.#syncing = false;
     }
+  }
+
+  /** Publishes local data to replace something unreadable or stale, under
+   * the clock of its last sync or edit rather than now — it must not win
+   * last-write-wins just for being written last — and flagged `repaired`,
+   * so a device that synced something newer pushes that back instead of
+   * applying this. */
+  #reseed(local: Backup, hash: string) {
+    local.exportedAt = Math.max(this.#config.lastSyncedAt, this.#config.lastChangedAt);
+    return this.#fit(local, true).then((fitted) => this.#uploadLocal(local, hash, fitted));
   }
 
   async #uploadLocal(local: Backup, hash: string, fitted?: Fitted<EncodedBlob>) {
