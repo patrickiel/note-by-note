@@ -2,7 +2,6 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'wxt';
-import { SYNC_ENDPOINT_PROD, SYNC_HOST_PATTERNS, syncHostPattern } from './src/features/sync/sync-hosts';
 
 // Persistent dev profile: extensions installed here (e.g. uBlock Origin
 // Lite for YouTube-breakage repros), logins, and site data survive between
@@ -104,7 +103,8 @@ export default defineConfig({
               // `data_collection_permissions` only in 140 — which is also the
               // current ESR line, so nothing supported is left behind.
               strict_min_version: '140.0',
-              // Sync ships Recent/Favorites off the device, and those carry the
+              // Sync ships Recent/Favorites off the device (through Firefox
+              // Sync's own storage — no server of ours), and those carry the
               // page URL, title and thumbnail of every track practised — AMO
               // counts that as browsing activity. `required` rather than
               // `optional` because sync is on out of the box
@@ -125,23 +125,19 @@ export default defineConfig({
     // gets `sidebar_action`, which needs no permission). `tabCapture` and
     // `offscreen` are Chromium-only APIs — see src/core/platform.ts, which gates
     // every caller on the same build target.
+    // `storage` covers `storage.sync`, which is all cross-device sync needs:
+    // no host permission, no `cookies`, no `identity` (Chromium's "is browser
+    // sync on" probe would want `identity.email` — an install warning — so
+    // there is no such probe; the Settings copy tells the user instead).
     permissions: [
       'storage',
-      'cookies',
       'activeTab',
       'scripting',
       'tabs',
       ...(browser === 'firefox' ? [] : ['tabCapture', 'offscreen']),
     ],
-    // `<all_urls>` is what Connect asks for. The sync host is what the ID
-    // cookie needs (see src/features/sync/panel/id-cookie.ts) — requested from
-    // the Sync settings, and covered by `<all_urls>` too once that is granted.
-    // Non-production builds also list the localhost Worker so `pnpm dev` can
-    // exercise the cookie path.
-    optional_host_permissions: [
-      '<all_urls>',
-      ...(mode === 'production' ? [syncHostPattern(SYNC_ENDPOINT_PROD)] : SYNC_HOST_PATTERNS),
-    ],
+    // `<all_urls>` is what Connect asks for.
+    optional_host_permissions: ['<all_urls>'],
     action: {
       default_title: 'Note by Note',
     },

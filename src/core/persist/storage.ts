@@ -1,5 +1,6 @@
 import { storage, type StorageItemKey, type WxtStorageItem } from '#imports';
 import { DEFAULT_SETTINGS, DEFAULT_UI_PREFS } from '../model/defaults';
+import { pruneDeletions, type Deletions } from './deletions';
 import type {
   EqPreset,
   FavoriteEntry,
@@ -75,6 +76,22 @@ export const eqPresetsItem = defineItem<EqPreset[]>('local:eqPresets', {
 export const grantedOriginsItem = defineItem<string[]>('local:grantedOrigins', {
   fallback: [],
 });
+
+/** What the user deleted and when, so a sync merge doesn't bring it back —
+ * see `deletions.ts`. Part of the backup; never part of "Reset Settings". */
+export const deletionsItem = defineItem<Deletions>('local:deletions', {
+  fallback: {},
+});
+
+/** Dates a deletion (`historyDeletion(key)`, `favoriteDeletion(key)`,
+ * `HISTORY_CLEARED`) at now, pruning expired records on the way. */
+export async function recordDeletion(...keys: string[]): Promise<void> {
+  const now = Date.now();
+  const current = await deletionsItem.getValue();
+  const next = { ...current };
+  for (const key of keys) next[key] = now;
+  await deletionsItem.setValue(pruneDeletions(next, now));
+}
 
 /** Per-track markers/snippets, keyed by TrackIdentity.key. */
 export function trackDataKey(key: string) {

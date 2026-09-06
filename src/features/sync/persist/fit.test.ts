@@ -103,23 +103,24 @@ function library(recent: number, favorites: number, orphans = 0): Backup {
     favorites: favs,
     eqPresets: [],
     tracks,
+    deletions: {},
   };
 }
 
 const keys = (list: { identity: TrackIdentity }[]) => list.map((e) => e.identity.key).sort();
 const charts = (b: Backup) => b.tracks.filter((t) => t.chordChart?.segments.length).length;
 
-test('nothing is cut while the library fits', () => {
+test('nothing is cut while the library fits', async () => {
   const b = library(5, 2);
-  const result = fitBackup(b, measure(b), measure);
+  const result = await fitBackup(b, measure(b), measure);
   assert.equal(result.trimmed, false);
   assert.equal(result.size, measure(b));
   assert.deepEqual(result.backup, b);
 });
 
-test('recent songs go first, oldest first, taking their records along', () => {
+test('recent songs go first, oldest first, taking their records along', async () => {
   const b = library(6, 2);
-  const withoutTwoOldest = fitBackup(b, measure(b) - 1, measure).backup;
+  const withoutTwoOldest = (await fitBackup(b, measure(b) - 1, measure)).backup;
   assert.ok(withoutTwoOldest.history.length < b.history.length);
   assert.equal(withoutTwoOldest.favorites.length, 2, 'favorites untouched');
   assert.equal(charts(withoutTwoOldest), charts(b) - (b.history.length - withoutTwoOldest.history.length), 'only the cut songs lost their charts');
@@ -133,12 +134,12 @@ test('recent songs go first, oldest first, taking their records along', () => {
   assert.deepEqual(keys(withoutTwoOldest.tracks), keys([...withoutTwoOldest.history]));
 });
 
-test('charts go next, oldest first; favorites and their markers stay', () => {
+test('charts go next, oldest first; favorites and their markers stay', async () => {
   const b = library(3, 3);
-  const noRecent = fitBackup(b, measure(b), measure);
+  const noRecent = await fitBackup(b, measure(b), measure);
   // Find the budget at which every non-favorite is gone but charts remain.
   const favoritesOnly = { ...b, history: b.history.slice(3), tracks: b.tracks.filter((t) => keys(b.favorites).includes(t.identity.key)) };
-  const result = fitBackup(b, measure(favoritesOnly) - 1, measure);
+  const result = await fitBackup(b, measure(favoritesOnly) - 1, measure);
   assert.equal(result.trimmed, true);
   assert.equal(result.backup.favorites.length, 3);
   assert.equal(result.backup.history.length, 3, 'favorites keep their Recent rows');
@@ -156,7 +157,7 @@ test('charts go next, oldest first; favorites and their markers stay', () => {
   assert.equal(noRecent.trimmed, false);
 });
 
-test('favorites go last, least recently accessed first', () => {
+test('favorites go last, least recently accessed first', async () => {
   const b = library(2, 4);
   // Exactly the two newest favorites, with their rows and chart-less records.
   const newest = keys(b.favorites.slice(2));
@@ -168,7 +169,7 @@ test('favorites go last, least recently accessed first', () => {
       .filter((t) => newest.includes(t.identity.key))
       .map((t) => ({ ...t, chordChart: null })),
   };
-  const result = fitBackup(b, measure(expected), measure);
+  const result = await fitBackup(b, measure(expected), measure);
   assert.equal(charts(result.backup), 0, 'every chart went before a favorite');
   assert.equal(result.backup.favorites.length, 2);
   const survivors = result.backup.favorites.map((f) => f.lastAccessedAt);
@@ -180,35 +181,35 @@ test('favorites go last, least recently accessed first', () => {
   assert.deepEqual(keys(result.backup.history), keys(result.backup.favorites), 'rows follow');
 });
 
-test('orphan records sit in the recent tier by their own edit time', () => {
+test('orphan records sit in the recent tier by their own edit time', async () => {
   const b = library(2, 1, 2);
   const oneOrphanLess = { ...b, tracks: b.tracks.filter((t) => t.identity.key !== song(3).key) };
-  const result = fitBackup(b, measure(oneOrphanLess), measure);
+  const result = await fitBackup(b, measure(oneOrphanLess), measure);
   assert.equal(result.trimmed, true);
   const kept = keys(result.backup.tracks);
   assert.ok(!kept.includes(song(0).key), 'the oldest recent song went first');
   assert.ok(kept.includes(song(4).key), 'the newest orphan is newer than the recents and stays');
 });
 
-test('the result is the largest plan that fits', () => {
+test('the result is the largest plan that fits', async () => {
   const b = library(12, 0);
   for (const keep of [1, 5, 11]) {
     const exact = { ...b, history: b.history.slice(12 - keep), tracks: b.tracks.filter((t) => keys(b.history.slice(12 - keep)).includes(t.identity.key)) };
-    const result = fitBackup(b, measure(exact), measure);
+    const result = await fitBackup(b, measure(exact), measure);
     assert.equal(result.backup.history.length, keep, `budget for ${keep}`);
     assert.equal(result.size, measure(exact));
   }
 });
 
-test('deterministic for equal input', () => {
-  const a = fitBackup(library(8, 3), 900, measure);
-  const b = fitBackup(library(8, 3), 900, measure);
+test('deterministic for equal input', async () => {
+  const a = await fitBackup(library(8, 3), 900, measure);
+  const b = await fitBackup(library(8, 3), 900, measure);
   assert.deepEqual(a, b);
 });
 
-test('too large when settings plus favorites alone are over budget', () => {
+test('too large when settings plus favorites alone are over budget', async () => {
   const b = library(2, 2);
   const floor = measure({ ...b, history: [], tracks: [], favorites: [] });
-  assert.throws(() => fitBackup(b, floor - 1, measure), LibraryTooLargeError);
-  assert.doesNotThrow(() => fitBackup(b, floor, measure));
+  await assert.rejects(fitBackup(b, floor - 1, measure), LibraryTooLargeError);
+  await assert.doesNotReject(fitBackup(b, floor, measure));
 });

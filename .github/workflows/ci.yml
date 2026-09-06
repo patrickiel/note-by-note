@@ -47,30 +47,6 @@ jobs:
       - name: Build (Firefox)
         run: pnpm build:firefox
 
-  server:
-    name: sync server
-    runs-on: ubuntu-latest
-    # Separate pnpm workspace with its own lockfile and its own tsconfig
-    # (Cloudflare Workers types), excluded from the root tsconfig — so `pnpm
-    # check` above does not cover it.
-    steps:
-      - uses: actions/checkout@v4
-
-      # No `version:` input — it reads `packageManager` from the root
-      # package.json, and passing both is an error.
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - run: pnpm install --frozen-lockfile
-        working-directory: server
-
-      - name: Type check
-        run: pnpm run check
-        working-directory: server
-
 # The e2e suite (e2e/run.mjs) is deliberately not run here: it needs a real
 # Chrome download plus generated WAV fixtures, and it is not currently
 # all-green — see CONTRIBUTING.md, which tracks the count. Run it locally for

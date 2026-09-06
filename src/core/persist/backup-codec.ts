@@ -6,6 +6,7 @@ import {
 } from '../model/defaults.ts';
 import { youtubeThumbnailUrl } from '../model/thumbnail.ts';
 import { identityKey } from '../model/track-identity.ts';
+import { normalizeDeletions, type Deletions } from './deletions.ts';
 import type {
   ChordChart,
   ChordSegment,
@@ -71,6 +72,9 @@ export interface Backup {
   eqPresets: EqPreset[];
   /** Per-track markers and snippets, one entry per saved track. */
   tracks: TrackData[];
+  /** What was deleted and when — see `deletions.ts`. Absent in files from
+   * before sync merged; `{}` then. */
+  deletions: Deletions;
 }
 
 // ---------------------------------------------------------------------------
@@ -194,6 +198,8 @@ export interface CompactBackup {
   h: CompactEntry[];
   f: CompactFavorite[];
   t: CompactTrack[];
+  /** Deletion records, dates in seconds; omitted when there are none. */
+  del?: Record<string, number>;
 }
 
 // ---------------------------------------------------------------------------
@@ -737,7 +743,7 @@ export function encodeBackup(backup: Backup): CompactBackup {
   const h = backup.history.map((e) => encodeEntry(e, songs));
   const f = backup.favorites.map((e) => encodeFavorite(e, songs));
   const t = [...backup.tracks].sort(byKey).map((track) => encodeTrack(track, songs));
-  return {
+  const out: CompactBackup = {
     format: BACKUP_FORMAT,
     version: COMPACT_VERSION,
     at: secs(backup.exportedAt),
@@ -749,6 +755,11 @@ export function encodeBackup(backup: Backup): CompactBackup {
     f,
     t,
   };
+  const deletions = Object.entries(normalizeDeletions(backup.deletions)).sort(([a], [b]) =>
+    a < b ? -1 : a > b ? 1 : 0,
+  );
+  if (deletions.length) out.del = Object.fromEntries(deletions.map(([k, when]) => [k, secs(when)]));
+  return out;
 }
 
 /** Reads a compact (v2) backup, or throws an `Error` whose message is safe to
@@ -769,6 +780,9 @@ export function decodeBackup(raw: unknown): Backup {
     favorites: requireArray(raw.f, 'favorites').map((e) => decodeFavorite(e, songs)),
     eqPresets: requireArray(raw.eq, 'eqPresets').map(decodeEqPreset),
     tracks: requireArray(raw.t, 'tracks').map((t) => decodeTrack(t, songs)),
+    deletions: Object.fromEntries(
+      Object.entries(normalizeDeletions(raw.del)).map(([k, when]) => [k, when * 1000]),
+    ),
   };
 }
 
@@ -793,6 +807,7 @@ function normalizeV1(raw: Record<string, unknown>): Backup {
     favorites: requireKeyedArray<FavoriteEntry>(raw.favorites, 'favorites'),
     eqPresets: requireArray(raw.eqPresets, 'eqPresets') as EqPreset[],
     tracks: requireKeyedArray<TrackData>(raw.tracks, 'tracks'),
+    deletions: normalizeDeletions(raw.deletions),
   };
 }
 

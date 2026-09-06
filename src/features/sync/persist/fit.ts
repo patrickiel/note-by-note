@@ -17,9 +17,9 @@ import type { FavoriteEntry, HistoryEntry, TrackData, TrackIdentity } from '../.
  * the library does (`isSameTrack`), so a record saved under a drifted
  * duration still follows its favorite.
  *
- * `measure` is injected: the caller decides what "size" means (encoded JSON
- * length in tests, the gzip+base64 blob for sync), so this stays pure and
- * runs under `node --test` — hence relative `.ts` imports.
+ * `measure` is injected (and may be async): the caller decides what "size"
+ * means — encoded JSON length in tests, the gzip+base64 blob for sync — so
+ * this stays pure and runs under `node --test`; hence relative `.ts` imports.
  */
 
 export interface FitResult {
@@ -127,25 +127,25 @@ function build(backup: Backup, tiers: Tiers, plan: Plan): Backup {
  * `budget`. Deterministic for equal input. Throws `LibraryTooLargeError`
  * when nothing cuttable is left and it still doesn't fit.
  */
-export function fitBackup(
+export async function fitBackup(
   backup: Backup,
   budget: number,
-  measure: (backup: Backup) => number,
-): FitResult {
+  measure: (backup: Backup) => number | Promise<number>,
+): Promise<FitResult> {
   const tiers = collectTiers(backup);
   const full: Plan = {
     songs: tiers.songs.length,
     charts: tiers.charts.length,
     favorites: tiers.favorites.length,
   };
-  const size = measure(backup);
+  const size = await measure(backup);
   if (size <= budget) return { backup, trimmed: false, size };
 
   const plan = { ...full };
-  const sizeOf = (p: Plan) => measure(build(backup, tiers, p));
+  const sizeOf = (p: Plan) => Promise.resolve(measure(build(backup, tiers, p)));
   for (const tier of TIERS) {
     // Earlier tiers are already empty. Does emptying this one fit?
-    const empty = sizeOf({ ...plan, [tier]: 0 });
+    const empty = await sizeOf({ ...plan, [tier]: 0 });
     if (empty > budget) {
       plan[tier] = 0;
       continue;
@@ -156,7 +156,7 @@ export function fitBackup(
     let loSize = empty;
     while (hi - lo > 1) {
       const mid = (lo + hi) >> 1;
-      const s = sizeOf({ ...plan, [tier]: mid });
+      const s = await sizeOf({ ...plan, [tier]: mid });
       if (s <= budget) {
         lo = mid;
         loSize = s;

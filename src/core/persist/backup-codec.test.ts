@@ -135,6 +135,7 @@ function backup(patch: Partial<Backup> = {}): Backup {
     favorites: [],
     eqPresets: [],
     tracks: [],
+    deletions: {},
     ...patch,
   };
 }
@@ -504,6 +505,17 @@ test('encode is deterministic regardless of track enumeration order', () => {
   const b = library(9);
   const shuffled = backup({ ...b, tracks: [...b.tracks].reverse() });
   assert.deepEqual(encodeBackup(shuffled), encodeBackup(b));
+});
+
+test('deletion records travel in seconds and are omitted when empty', () => {
+  assert.equal('del' in encodeBackup(backup()), false);
+  const b = backup({ deletions: { 'h:abc:230': 1_757_112_345_678, 'h:*': 1_757_000_000_000 } });
+  const enc = encodeBackup(b);
+  assert.deepEqual(enc.del, { 'h:*': 1757000000, 'h:abc:230': 1757112346 });
+  assert.deepEqual(roundTrip(b).deletions, { 'h:*': 1757000000000, 'h:abc:230': 1757112346000 });
+  const v1 = JSON.parse(JSON.stringify(backup()));
+  delete v1.deletions;
+  assert.deepEqual(parseBackupJson(v1).deletions, {});
 });
 
 test('exportedAt is kept to the second; appVersion is dropped', () => {
