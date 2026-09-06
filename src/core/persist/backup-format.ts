@@ -7,6 +7,7 @@ import type {
   TrackData,
   UiPrefs,
 } from '../model/types.ts';
+import { normalizeDeletions, type Deletions } from './deletions.ts';
 
 /** The backup file's shape and validation, kept free of storage/`#imports` so
  * the sync codec (and its `node --test` suite) can share it with `backup.ts`.
@@ -34,6 +35,9 @@ export interface Backup {
   eqPresets: EqPreset[];
   /** Per-track markers and snippets, one entry per saved track. */
   tracks: TrackData[];
+  /** What was deleted and when — carried so sync can tell a deletion from
+   * an item left out to fit. Files from older builds lack it (backfilled). */
+  deletions: Deletions;
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -84,5 +88,6 @@ export function normalizeBackup(raw: unknown): Backup {
     favorites: requireKeyedArray<FavoriteEntry>(raw.favorites, 'favorites'),
     eqPresets: requireArray(raw.eqPresets, 'eqPresets') as EqPreset[],
     tracks: requireKeyedArray<TrackData>(raw.tracks, 'tracks'),
+    deletions: normalizeDeletions(raw.deletions),
   };
 }

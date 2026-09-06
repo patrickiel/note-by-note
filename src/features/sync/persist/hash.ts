@@ -25,6 +25,9 @@ export async function sha256Hex(text: string): Promise<string> {
  * Content hash of a snapshot's data fields — excludes `exportedAt` and
  * `appVersion` so re-exporting unchanged data hashes the same. Tracks are
  * sorted by identity key because their storage-enumeration order is arbitrary.
+ * The deletion records count as content: two snapshots that differ only there
+ * must not read as equal, or the receiver would skip the apply that carries
+ * the deletions over.
  */
 export async function snapshotHash(backup: Backup): Promise<string> {
   return sha256Hex(
@@ -34,6 +37,7 @@ export async function snapshotHash(backup: Backup): Promise<string> {
       history: backup.history,
       favorites: backup.favorites,
       eqPresets: backup.eqPresets,
+      deletions: backup.deletions,
       tracks: [...backup.tracks].sort((a, b) =>
         a.identity.key < b.identity.key ? -1 : a.identity.key > b.identity.key ? 1 : 0,
       ),

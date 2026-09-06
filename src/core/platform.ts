@@ -23,9 +23,8 @@ export const CAN_CAPTURE_TAB: boolean = !IS_FIREFOX;
  * `sidebarAction`. */
 export const HAS_SIDE_PANEL_API: boolean = !IS_FIREFOX;
 
-/** Whether the browser can say if its own sync is carrying `storage.sync`
- * anywhere. Chromium answers through `identity.getProfileUserInfo` with
- * `accountStatus: 'SYNC'` (needs the `identity` permission, which carries no
- * install warning); Firefox exposes nothing about Firefox Sync, so the panel
- * can only state the condition there. */
-export const CAN_DETECT_BROWSER_SYNC: boolean = !IS_FIREFOX;
+// Deliberately no "is the browser's own sync on" flag: neither browser can
+// say without a cost. Chromium's `identity.getProfileUserInfo` returns an
+// empty account unless the manifest carries `identity.email` (an install
+// warning, and a disable-until-re-approved on update), and Firefox exposes
+// nothing about Firefox Sync. The Sync settings copy states the condition.

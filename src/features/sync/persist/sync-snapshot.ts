@@ -21,6 +21,7 @@ import {
   requireKeyedArray,
   type Backup,
 } from '../../../core/persist/backup-format.ts';
+import { normalizeDeletions, type Deletions } from '../../../core/persist/deletions.ts';
 
 /**
  * The snapshot that travels through `browser.storage.sync` — the backup with
@@ -78,12 +79,21 @@ export interface SyncSnapshot {
   /** Wall clock of the device that wrote it — the last-write-wins clock. */
   exportedAt: number;
   appVersion: string;
+  /** Written to re-seed an area that stayed torn, under the writer's *last
+   * sync* clock rather than now — its data is that old, and must not win
+   * last-write-wins just for being written last. A device that has synced
+   * something newer pushes that back instead of applying this. */
+  repaired?: boolean;
   settings: Settings;
   uiPrefs: UiPrefs;
   history: HistoryEntry[];
   favorites: FavoriteEntry[];
   eqPresets: EqPreset[];
   tracks: CompactTrackData[];
+  /** What the writer deleted and when (`core/persist/deletions.ts`) — how a
+   * receiver tells a deletion from a record trimmed to fit. Never trimmed;
+   * absent from older writers' snapshots. */
+  deleted: Deletions;
   /** The writer had to leave something out to fit the quota. */
   trimmed: boolean;
 }
@@ -211,6 +221,7 @@ export function snapshotToBackup(snapshot: SyncSnapshot): Backup {
     favorites: snapshot.favorites,
     eqPresets: snapshot.eqPresets,
     tracks: snapshot.tracks.map(decodeTrack),
+    deletions: snapshot.deleted,
   };
 }
 
@@ -246,6 +257,7 @@ export function parseSyncSnapshot(raw: unknown): SyncSnapshot {
     v: SYNC_FORMAT_VERSION,
     exportedAt: typeof raw.exportedAt === 'number' ? raw.exportedAt : 0,
     appVersion: typeof raw.appVersion === 'string' ? raw.appVersion : '',
+    ...(raw.repaired === true ? { repaired: true } : {}),
     // Partial objects are fine here: `normalizeBackup` backfills the defaults
     // when the snapshot is applied.
     settings: (isRecord(raw.settings) ? raw.settings : {}) as unknown as Settings,
@@ -254,6 +266,7 @@ export function parseSyncSnapshot(raw: unknown): SyncSnapshot {
     favorites: requireKeyedArray<FavoriteEntry>(raw.favorites, 'favorites'),
     eqPresets: requireArray(raw.eqPresets, 'eqPresets') as EqPreset[],
     tracks: requireKeyedArray<CompactTrackData>(raw.tracks, 'tracks').map(normalizeTrack),
+    deleted: normalizeDeletions(raw.deleted),
     trimmed: raw.trimmed === true,
   };
 }

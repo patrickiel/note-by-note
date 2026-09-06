@@ -132,6 +132,7 @@ test('snapshotToBackup yields the file shape and parseSyncSnapshot validates it 
     favorites: [],
     eqPresets: [{ name: 'p', gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }],
     tracks: [encodeTrack(track('a', { chordChart: frameChart(70) }), true)],
+    deleted: { 'track:gone': 4 },
     trimmed: true,
   };
   const backup = snapshotToBackup(snapshot);

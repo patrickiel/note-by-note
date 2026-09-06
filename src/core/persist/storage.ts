@@ -1,6 +1,7 @@
 import { storage, type StorageItemKey, type WxtStorageItem } from '#imports';
 import { DEFAULT_SETTINGS, DEFAULT_UI_PREFS } from '../model/defaults';
 import { hasContent } from '../model/track-content';
+import { pruneDeletions, trackDeletion, type Deletions } from './deletions';
 import type {
   EqPreset,
   FavoriteEntry,
@@ -77,6 +78,18 @@ export const grantedOriginsItem = defineItem<string[]>('local:grantedOrigins', {
   fallback: [],
 });
 
+/** What the user deleted and when, so sync can carry the deletion to other
+ * devices instead of letting their copy come back — see `deletions.ts`.
+ * Part of the backup; not a per-device record. */
+export const deletionsItem = defineItem<Deletions>('local:deletions', { fallback: {} });
+
+/** Dates a deletion (a key from `deletions.ts`). Every user-driven removal
+ * of a synced item goes through here; sweeps and restores do not. */
+export async function recordDeletion(key: string): Promise<void> {
+  const current = await deletionsItem.getValue();
+  await deletionsItem.setValue(pruneDeletions({ ...current, [key]: Date.now() }));
+}
+
 /** Per-track markers/snippets, keyed by TrackIdentity.key. */
 export function trackDataKey(key: string) {
   return `local:track:${key}` as const;
@@ -90,8 +103,22 @@ export async function saveTrackData(data: TrackData): Promise<void> {
   await storage.setItem(trackDataKey(data.identity.key), toPlain(data));
 }
 
+/** The user emptied the record (last marker or snippet gone): the removal is
+ * dated so the copy on other devices goes too. Only when there was a record
+ * with content to remove — the track writer also lands here when a flag is
+ * toggled on a track that has nothing saved, and dating that would delete a
+ * record another device holds for the track (one this device never received,
+ * or received trimmed). */
 export async function removeTrackData(key: string): Promise<void> {
+  const had = await loadTrackData(key);
   await storage.removeItem(trackDataKey(key));
+  if (had && hasContent(had)) await recordDeletion(trackDeletion(key));
+}
+
+/** Removes records another device deleted (a sync apply) — no deletion
+ * record of our own; the remote's is merged into ours by the caller. */
+export async function removeTrackDataByKeys(keys: string[]): Promise<void> {
+  if (keys.length) await browser.storage.local.remove(keys.map((k) => `${RAW_TRACK_PREFIX}${k}`));
 }
 
 /** Raw `browser.storage` keys carry no `local:` prefix — see `trackDataKey`. */

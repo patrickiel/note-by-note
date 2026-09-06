@@ -60,6 +60,7 @@ function snapshot(tracks = 40): SyncSnapshot {
         computedAt: 1,
       },
     })),
+    deleted: {},
     trimmed: false,
   };
 }

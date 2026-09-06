@@ -1,7 +1,8 @@
 import { HISTORY_LIMIT } from '../../../core/model/defaults';
 import type { EffectParams, HistoryEntry, TrackIdentity } from '../../../core/model/types';
 import { isSameTrack } from '../../../core/model/track-identity';
-import { historyItem } from '../../../core/persist/storage';
+import { HISTORY_CLEARED, historyDeletion } from '../../../core/persist/deletions';
+import { historyItem, recordDeletion } from '../../../core/persist/storage';
 
 /** Insert or refresh a Recent entry (newest first, LRU-capped).
  *
@@ -46,11 +47,19 @@ export async function dedupeHistory(): Promise<void> {
   if (kept.length !== list.length) await historyItem.setValue(kept);
 }
 
+/** Dated (see `deletions.ts`) so sync removes the row on other devices too
+ * — a sync apply keeps rows the remote merely left out, so without the date
+ * the row would come straight back. */
 export async function removeHistoryEntry(key: string): Promise<void> {
   const list = await historyItem.getValue();
-  await historyItem.setValue(list.filter((e) => e.identity.key !== key));
+  const next = list.filter((e) => e.identity.key !== key);
+  if (next.length === list.length) return;
+  await historyItem.setValue(next);
+  await recordDeletion(historyDeletion(key));
 }
 
+/** One record covers every row, however many there were. */
 export async function clearHistory(): Promise<void> {
   await historyItem.setValue([]);
+  await recordDeletion(HISTORY_CLEARED);
 }

@@ -121,18 +121,17 @@ export default defineConfig({
         }
       : { minimum_chrome_version: '116' }),
     // `sidePanel` is added by WXT itself from the sidepanel entrypoint (Firefox
-    // gets `sidebar_action`, which needs no permission). `tabCapture`,
-    // `offscreen` and `identity` are Chromium-only APIs — see
-    // src/core/platform.ts, which gates every caller on the same build target.
-    // `identity` (without `identity.email`) shows no install warning and is
-    // used only to ask whether the profile's sync is on, so the Sync settings
-    // can say when other devices won't be reached.
+    // gets `sidebar_action`, which needs no permission). `tabCapture` and
+    // `offscreen` are Chromium-only APIs — see src/core/platform.ts, which
+    // gates every caller on the same build target. No `identity`: without
+    // `identity.email` (an install warning) it cannot tell whether the
+    // profile's sync is on, which was the only question it was asked.
     permissions: [
       'storage',
       'activeTab',
       'scripting',
       'tabs',
-      ...(browser === 'firefox' ? [] : ['tabCapture', 'offscreen', 'identity']),
+      ...(browser === 'firefox' ? [] : ['tabCapture', 'offscreen']),
     ],
     // What Connect asks for, in a user gesture — never at install time.
     optional_host_permissions: ['<all_urls>'],

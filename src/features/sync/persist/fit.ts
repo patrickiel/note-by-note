@@ -15,8 +15,9 @@ import {
  * `apply.ts`).
  *
  * Tiers, highest first:
- *   T1  settings, UI prefs, EQ presets, the Favorites list, and the records
- *       (markers, snippets) of favorited tracks — never trimmed
+ *   T1  settings, UI prefs, EQ presets, the Favorites list, the deletion
+ *       records, and the records (markers, snippets) of favorited tracks —
+ *       never trimmed
  *   T2  Recent, newest first, with those tracks' records
  *   T3  records of tracks in neither list, most recently edited first
  *   T4  chord charts, in the same order as the tracks above
@@ -35,6 +36,8 @@ export interface FitPlan {
 export interface FitMeta {
   exportedAt: number;
   appVersion: string;
+  /** This snapshot re-seeds a torn area — see `SyncSnapshot.repaired`. */
+  repaired?: boolean;
 }
 
 export interface Encoded<P> {
@@ -126,12 +129,14 @@ function build(backup: Backup, tiers: Tiers, plan: FitPlan, meta: FitMeta): Sync
     v: SYNC_FORMAT_VERSION,
     exportedAt: meta.exportedAt,
     appVersion: meta.appVersion,
+    ...(meta.repaired ? { repaired: true } : {}),
     settings: backup.settings,
     uiPrefs: backup.uiPrefs,
     history: tiers.history.slice(0, plan.history),
     favorites: tiers.favorites,
     eqPresets: backup.eqPresets,
     tracks: tracks.map((t) => encodeTrack(t, chartKeys.has(t.identity.key))),
+    deleted: backup.deletions,
     trimmed:
       plan.history < full.history ||
       plan.extraTracks < full.extraTracks ||

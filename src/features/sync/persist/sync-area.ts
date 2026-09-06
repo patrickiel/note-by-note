@@ -30,14 +30,24 @@ export async function readSyncArea(): Promise<ReadResult & { bytes: number }> {
  * meta with stale extras ignores them (it only reads up to `meta.chunks`);
  * one that sees the old meta with new chunks fails the hash and reads
  * `torn`.
+ *
+ * Only chunks still holding what the pre-write read saw are removed: one
+ * that changed in between belongs to a larger blob another device is writing
+ * right now, and taking it would leave that blob's meta pointing at chunks
+ * that no longer exist — a torn state nobody's next write repairs. (The
+ * window is narrowed, not closed; the store re-seeds an area torn for too
+ * long.) Reads are unmetered, so the second one is free.
  */
 export async function writeSyncArea(blob: EncodedBlob): Promise<void> {
   const existing = await browser.storage.sync.get(null);
   await browser.storage.sync.set(blobToItems(blob));
-  const stale = Object.keys(existing).filter((key) => {
+  const candidates = Object.keys(existing).filter((key) => {
     const i = chunkIndex(key);
     return i !== null && i >= blob.chunks.length;
   });
+  if (!candidates.length) return;
+  const now = await browser.storage.sync.get(candidates);
+  const stale = candidates.filter((key) => key in now && now[key] === existing[key]);
   if (stale.length) await browser.storage.sync.remove(stale);
 }
 

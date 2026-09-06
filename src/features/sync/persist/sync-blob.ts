@@ -145,8 +145,10 @@ export function blobToItems(blob: EncodedBlob): Record<string, unknown> {
 
 /** Reads the area's items back into a snapshot. `torn` covers every
  * inconsistency a concurrent write could produce — a missing chunk, a stale
- * one, a malformed meta — because all of them heal on that writer's next
- * push. Only a blob from a newer build is an error worth showing. */
+ * one, a malformed meta. Most are a write in flight and whole on the next
+ * read; one that stays torn (two devices' writes merged per key) is re-seeded
+ * by the store after a grace period, since nothing can read it to push over
+ * it. Only a blob from a newer build is an error worth showing. */
 export async function decodeItems(items: Record<string, unknown>): Promise<ReadResult> {
   const meta = items[META_KEY];
   if (meta === undefined) return { kind: 'none' };

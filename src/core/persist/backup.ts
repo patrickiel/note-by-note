@@ -1,5 +1,6 @@
 import { BACKUP_FORMAT, BACKUP_VERSION, normalizeBackup, type Backup } from './backup-format';
 import {
+  deletionsItem,
   eqPresetsItem,
   favoritesItem,
   historyItem,
@@ -13,7 +14,7 @@ import {
 export type { Backup } from './backup-format';
 
 export async function createBackup(): Promise<Backup> {
-  const [settings, uiPrefs, history, favorites, eqPresets, tracks] =
+  const [settings, uiPrefs, history, favorites, eqPresets, tracks, deletions] =
     await Promise.all([
       settingsItem.getValue(),
       uiPrefsItem.getValue(),
@@ -21,6 +22,7 @@ export async function createBackup(): Promise<Backup> {
       favoritesItem.getValue(),
       eqPresetsItem.getValue(),
       loadAllTrackData(),
+      deletionsItem.getValue(),
     ]);
   return {
     format: BACKUP_FORMAT,
@@ -33,6 +35,7 @@ export async function createBackup(): Promise<Backup> {
     favorites,
     eqPresets,
     tracks,
+    deletions,
   };
 }
 
@@ -67,6 +70,7 @@ export async function restoreBackup(backup: Backup): Promise<void> {
     historyItem.setValue(backup.history),
     favoritesItem.setValue(backup.favorites),
     eqPresetsItem.setValue(backup.eqPresets),
+    deletionsItem.setValue(backup.deletions),
     ...backup.tracks.map(saveTrackData),
   ]);
 }

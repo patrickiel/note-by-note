@@ -79,6 +79,7 @@ function backup(): Backup {
     favorites,
     eqPresets: [],
     tracks,
+    deletions: {},
   };
 }
 

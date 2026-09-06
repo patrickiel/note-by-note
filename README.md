@@ -185,8 +185,10 @@ That storage is small (100 KB), so the snapshot is gzipped and, when it still
 doesn't fit, trimmed by priority: settings, presets, Favorites and their
 markers and snippets always go; then Recent, newest first; then other tracks
 with markers or snippets; chord charts last, favorites first. Nothing is
-deleted on the device it was trimmed from, and another device simply
-re-analyzes a chart that didn't fit. `Settings → Sync` says when something was
+deleted on the device it was trimmed from — what a device receives is merged
+into what it has, and a real deletion (a marker, snippet or Recent row
+removed) travels as a dated record so it doesn't come back from a device that
+still held a copy. Another device simply re-analyzes a chart that didn't fit. `Settings → Sync` says when something was
 left out. The mechanics — the compact chart encoding, the chunked blob, the
 trimming order — are in [src/features/sync/persist/](src/features/sync/persist/).
 

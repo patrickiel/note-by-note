@@ -1,27 +1,31 @@
-import type { TrackData } from '../../../core/model/types';
 import { normalizeBackup } from '../../../core/persist/backup-format';
+import { mergeDeletions, pruneDeletions } from '../../../core/persist/deletions';
 import {
+  deletionsItem,
   eqPresetsItem,
   favoritesItem,
   historyItem,
   loadAllTrackData,
+  removeTrackDataByKeys,
   saveAllTrackData,
   settingsItem,
   uiPrefsItem,
 } from '../../../core/persist/storage';
-import { decodeTrack, snapshotToBackup, type SyncSnapshot } from './sync-snapshot';
+import { mergeHistory, mergeTracks } from './merge';
+import { snapshotToBackup, type SyncSnapshot } from './sync-snapshot';
 
 /**
  * Writes a remote snapshot over this device's data. Unlike `restoreBackup`,
- * this is a merge for the per-track records: the sender may have left some
- * out (or sent one without its chart) purely to fit the quota, and an absent
- * item must never read as a deletion here.
+ * this is a merge for what the sender may have trimmed to fit the quota
+ * (`fit.ts`): an absent Recent row or per-track record is unknown to the
+ * sender, not deleted, and stays here — unless the sender's deletion records
+ * (`core/persist/deletions.ts`) date its removal. See `merge.ts` for the
+ * rule; the deletion records themselves are merged too, so a third device
+ * learns a deletion from whichever peer it syncs with.
  *
- * - settings, UI prefs, EQ presets, Recent and Favorites: taken wholesale
- *   (last write wins on the whole list);
- * - tracks: every remote record is written; a remote record without a chart
- *   keeps this device's chart for that track; records only this device has
- *   are left untouched.
+ * - settings, UI prefs, EQ presets and Favorites: taken wholesale (last
+ *   write wins on the whole list — none of them is ever trimmed);
+ * - Recent and tracks: merged.
  *
  * Known limit: there is no way to say "chart deleted" — clearing a chart on
  * one device leaves the other's copy until a new analysis overwrites it. The
@@ -31,25 +35,21 @@ import { decodeTrack, snapshotToBackup, type SyncSnapshot } from './sync-snapsho
 export async function applySyncSnapshot(snapshot: SyncSnapshot): Promise<void> {
   // Backfills defaults an older sender lacked and validates the lists.
   const backup = normalizeBackup(snapshotToBackup(snapshot));
-  const local = new Map<string, TrackData>();
-  for (const t of await loadAllTrackData()) local.set(t.identity.key, t);
-  const merged = snapshot.tracks.map((remote): TrackData => {
-    const decoded = decodeTrack(remote);
-    const mine = local.get(remote.identity.key);
-    const out: TrackData = {
-      ...decoded,
-      chordChart: remote.chart ? decoded.chordChart : (mine?.chordChart ?? null),
-    };
-    const chordsEnabled = remote.chordsEnabled ?? mine?.chordsEnabled;
-    if (chordsEnabled !== undefined) out.chordsEnabled = chordsEnabled;
-    return out;
-  });
+  const [localTracks, localHistory, localDeleted] = await Promise.all([
+    loadAllTrackData(),
+    historyItem.getValue(),
+    deletionsItem.getValue(),
+  ]);
+  const tracks = mergeTracks(snapshot.tracks, localTracks, backup.deletions, localDeleted);
+  const kept = new Set(tracks.map((t) => t.identity.key));
   await Promise.all([
     settingsItem.setValue(backup.settings),
     uiPrefsItem.setValue(backup.uiPrefs),
-    historyItem.setValue(backup.history),
+    historyItem.setValue(mergeHistory(backup.history, localHistory, backup.deletions, localDeleted)),
     favoritesItem.setValue(backup.favorites),
     eqPresetsItem.setValue(backup.eqPresets),
-    saveAllTrackData(merged),
+    deletionsItem.setValue(pruneDeletions(mergeDeletions(localDeleted, backup.deletions))),
+    saveAllTrackData(tracks),
+    removeTrackDataByKeys(localTracks.map((t) => t.identity.key).filter((k) => !kept.has(k))),
   ]);
 }

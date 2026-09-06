@@ -1,8 +1,7 @@
 import { createBackup, type Backup } from '../../../core/persist/backup';
-import { CAN_DETECT_BROWSER_SYNC } from '../../../core/platform';
 import { session } from '../../../core/state/session.svelte';
 import { applySyncSnapshot } from '../persist/apply';
-import { fitSnapshot, type Fitted } from '../persist/fit';
+import { fitSnapshot, SnapshotTooLargeError, type Fitted } from '../persist/fit';
 import { snapshotHash } from '../persist/hash';
 import {
   classifySyncError,
@@ -40,6 +39,14 @@ const MIN_PUSH_SPACING_MS = 30_000;
 const REMOTE_DEBOUNCE_MS = 1000;
 /** A torn read means another device is mid-write; look again shortly. */
 const TORN_RETRY_MS = 5000;
+/** A read still torn this long after the first is not a write in flight —
+ * two devices wrote at once and the per-key merge left the area in a state
+ * no one will ever write again (one side's meta with the other's chunks, or
+ * a shrinking write's cleanup having removed chunks a larger concurrent one
+ * added). Nothing reads it, so nothing pushes; this device re-seeds it —
+ * after a random extra wait of up to the same again, so two devices don't
+ * re-seed together and tear it a second time. */
+const TORN_REPAIR_MS = 30_000;
 /** Write caps are per minute; wait one out before retrying. */
 const RATE_LIMIT_RETRY_MS = 65_000;
 /** Change events are the real signal; this is the net under them. */
@@ -47,7 +54,7 @@ const SAFETY_INTERVAL_MS = 15 * 60_000;
 
 /** Raw storage keys (no `local:` prefix in change events) that belong to the
  * backup snapshot. `syncConfig` itself is deliberately absent. */
-const SYNCED_KEY_RE = /^(settings|uiPrefs|history|favorites|eqPresets|track:)/;
+const SYNCED_KEY_RE = /^(settings|uiPrefs|history|favorites|eqPresets|deletions|track:)/;
 
 /**
  * Device sync over the browser's own extension sync storage — the backup
@@ -85,12 +92,6 @@ class SyncStore {
   /** Occupancy of the browser's sync area as of the last read or write;
    * 0 until the first reconcile of this panel document. */
   usedBytes = $state(0);
-  /** Whether the browser is carrying the sync area to other devices — the
-   * profile is signed in with sync on. `storage.sync` writes succeed either
-   * way (unsigned-in it is just a local store), so without this the panel
-   * would report "saved" on a device nothing will ever reach. `null` where
-   * the browser can't say (Firefox). */
-  linked = $state<boolean | null>(null);
   #syncing = $state(false);
 
   status = $derived<'off' | 'syncing' | 'error' | 'idle'>(
@@ -115,6 +116,9 @@ class SyncStore {
   #writingRemote = false;
   /** `meta.hash` of the blob we last wrote — our own echo carries it. */
   #lastBlobHash: string | null = null;
+  /** When this device gives up waiting for a torn area to heal and re-seeds
+   * it; 0 while reads are whole. */
+  #tornDeadline = 0;
   #lastPushAt = 0;
   #pushTimer: ReturnType<typeof setTimeout> | undefined;
   #remoteTimer: ReturnType<typeof setTimeout> | undefined;
@@ -146,10 +150,6 @@ class SyncStore {
       if (!Object.keys(changes).some((key) => SYNCED_KEY_RE.test(key))) return;
       this.#onDataChanged();
     });
-    if (CAN_DETECT_BROWSER_SYNC) {
-      browser.identity.onSignInChanged.addListener(() => void this.#refreshLinked());
-      void this.#refreshLinked();
-    }
 
     if (this.#config.enabled) {
       await this.#enqueue(() => this.#reconcile({ allowApply: true }));
@@ -226,8 +226,10 @@ class SyncStore {
     });
   }
 
+  /** The user asked, so a torn area is repaired now rather than after
+   * `TORN_REPAIR_MS`. */
   async syncNow(): Promise<void> {
-    await this.#enqueue(() => this.#reconcile({ allowApply: true }));
+    await this.#enqueue(() => this.#reconcile({ allowApply: true, repairTorn: true }));
   }
 
   /** Nothing here a remote snapshot could destroy. Settings and UI prefs are
@@ -240,19 +242,6 @@ class SyncStore {
       local.tracks.length === 0 &&
       local.eqPresets.length === 0
     );
-  }
-
-  /** `accountStatus: 'SYNC'` returns an account only while the profile is
-   * signed in *and* syncing; a signed-in profile with sync off reads as
-   * empty, which is the answer that matters here. Best-effort: an API that
-   * throws (a Chromium fork without Google accounts) leaves `null`. */
-  async #refreshLinked() {
-    try {
-      const info = await browser.identity.getProfileUserInfo({ accountStatus: 'SYNC' });
-      this.linked = info.id !== '';
-    } catch {
-      this.linked = null;
-    }
   }
 
   #reflect() {
@@ -315,7 +304,7 @@ class SyncStore {
     }, delay);
   }
 
-  #fit(local: Backup): Promise<Fitted<EncodedBlob>> {
+  #fit(local: Backup, repaired = false): Promise<Fitted<EncodedBlob>> {
     return fitSnapshot(
       local,
       async (snapshot) => {
@@ -323,24 +312,42 @@ class SyncStore {
         return { size: blob.size, payload: blob };
       },
       BUDGET_CHARS,
-      { exportedAt: local.exportedAt, appVersion: local.appVersion },
+      { exportedAt: local.exportedAt, appVersion: local.appVersion, repaired },
     );
   }
 
   /** Read-and-decide: push, apply remote, or nothing — last write wins. */
-  async #reconcile(opts: { allowApply: boolean }) {
+  async #reconcile(opts: { allowApply: boolean; repairTorn?: boolean }) {
     if (!this.#config.enabled) return;
     this.#syncing = true;
     try {
       const read = await readSyncArea();
       this.usedBytes = read.bytes;
-      if (read.kind === 'torn') {
-        this.#scheduleRetry(TORN_RETRY_MS);
-        return;
-      }
       const local = await createBackup();
       const localHash = await snapshotHash(local);
       const localChanged = localHash !== this.#config.lastSyncedHash;
+
+      if (read.kind === 'torn') {
+        this.#tornDeadline ||= Date.now() + TORN_REPAIR_MS * (1 + Math.random());
+        // Only a device that has joined the data set may re-seed. The torn
+        // blob's writers still hold their data locally and reconcile against
+        // the re-seeded area like any other remote write; a fresh install
+        // has nothing to seed with and would only hand them empty lists.
+        const stuck = opts.repairTorn || Date.now() >= this.#tornDeadline;
+        if (stuck && this.#config.consented) {
+          this.#tornDeadline = 0;
+          // Under the clock of this data's last sync or edit, not now: the
+          // re-seed must not win last-write-wins over a device that synced
+          // something newer in the meantime (that device pushes back — see
+          // the `repaired` rule below).
+          local.exportedAt = Math.max(this.#config.lastSyncedAt, this.#config.lastChangedAt);
+          await this.#uploadLocal(local, localHash, await this.#fit(local, true));
+        } else {
+          this.#scheduleRetry(TORN_RETRY_MS);
+        }
+        return;
+      }
+      this.#tornDeadline = 0;
 
       if (read.kind === 'none') {
         // Empty area: first device, or the blob was cleared. Seeding it is
@@ -356,23 +363,41 @@ class SyncStore {
         else if (this.#config.lastError) await this.#saveConfig({ lastError: null });
         return;
       }
+      if (remote.repaired && remote.exportedAt < this.#config.lastSyncedAt) {
+        // A device re-seeded a torn area from data older than what we last
+        // synced; ours is the newer copy, so it goes back up (that device
+        // then applies it like any other newer write).
+        await this.#uploadLocal(local, localHash);
+        return;
+      }
       // Another device wrote since our last sync. Compare what we *would*
       // push, not the raw local data — trimming and rounding are lossy.
-      const fitted = await this.#fit(local);
-      const [remoteHash, ownHash] = await Promise.all([
-        snapshotHash(snapshotToBackup(remote)),
-        snapshotHash(snapshotToBackup(fitted.snapshot)),
-      ]);
-      if (remoteHash === ownHash) {
-        // Same content, different timestamp — adopt its bookkeeping, skip the reload.
-        await this.#saveConfig({
-          lastSyncedAt: remote.exportedAt,
-          lastSyncedHash: localHash,
-          pendingPush: false,
-          lastError: null,
-          consented: true,
-        });
-        return;
+      const wouldApply = !localChanged || remote.exportedAt > this.#config.lastChangedAt;
+      let fitted: Fitted<EncodedBlob> | undefined;
+      try {
+        fitted = await this.#fit(local);
+      } catch (err) {
+        // Local data too large to push is no reason not to take the remote:
+        // that is a plain apply, and if its Favorites are smaller it is also
+        // what gets this device back under the quota. Only the push needs a fit.
+        if (!(err instanceof SnapshotTooLargeError) || !wouldApply) throw err;
+      }
+      if (fitted) {
+        const [remoteHash, ownHash] = await Promise.all([
+          snapshotHash(snapshotToBackup(remote)),
+          snapshotHash(snapshotToBackup(fitted.snapshot)),
+        ]);
+        if (remoteHash === ownHash) {
+          // Same content, different timestamp — adopt its bookkeeping, skip the reload.
+          await this.#saveConfig({
+            lastSyncedAt: remote.exportedAt,
+            lastSyncedHash: localHash,
+            pendingPush: false,
+            lastError: null,
+            consented: true,
+          });
+          return;
+        }
       }
       if (!this.#config.consented) {
         // Sync ships on, and the area is shared by every install on the
@@ -385,7 +410,7 @@ class SyncStore {
         }
         await this.#saveConfig({ consented: true });
       }
-      if (!localChanged || remote.exportedAt > this.#config.lastChangedAt) {
+      if (wouldApply) {
         if (opts.allowApply) await this.#applyRemote(remote);
         // else: deferred — don't push over a newer remote either.
       } else {

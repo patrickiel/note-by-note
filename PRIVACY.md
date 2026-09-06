@@ -87,7 +87,6 @@ server and cannot see the data.
 | `activeTab`, `scripting` | Injects the audio engine into the tab when you press **Connect**. |
 | `tabs` | Reads the active tab's URL and title to look up the practice data you saved for that track. |
 | `tabCapture`, `offscreen` (Chrome only) | Fallback audio path for pages that block the audio worklet. |
-| `identity` (Chrome only) | Asks the browser one yes/no question — is this profile signed in with sync on? — so `Settings → Sync` can warn when other devices won't be reached. No email, name or account details are read, and nothing is sent anywhere. |
 | Access to all sites (optional) | Requested **only** when you first press **Connect**, never at install time, because you choose which sites to practise on. `Settings → Revoke Permissions` takes it back. |
 
 ## Children

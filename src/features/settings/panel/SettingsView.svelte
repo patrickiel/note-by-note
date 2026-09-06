@@ -509,7 +509,7 @@
       <div class="flex items-center gap-3 py-2.5 px-3">
         {@render prefText(
           'Sync between devices',
-          "Keep your songs, settings, markers and snippets the same on all your devices. Uses your browser's built-in sync.",
+          "Keep your songs, settings, markers and snippets the same on all your devices. Uses your browser's built-in sync, so sign in to your browser with sync turned on for it to reach them.",
         )}
         <!-- Function binding: enabling can be declined in a confirm, so the
              knob must follow the store instead of flipping optimistically. -->
@@ -518,17 +518,6 @@
           label="Sync between devices"
         />
       </div>
-      {#if sync.enabled && sync.linked === false}
-        <!-- Chromium can tell; on Firefox `linked` stays null and the toggle
-             copy has to carry the condition on its own. -->
-        <div class="flex items-start gap-2 py-2.5 px-3 border-t border-line text-[12px] text-danger">
-          <span class="flex-none flex mt-px"><Icon name="alert" size={14} /></span>
-          <span>
-            Not syncing yet: sign in to your browser and turn on sync. Your data
-            stays saved here in the meantime.
-          </span>
-        </div>
-      {/if}
       {#if sync.needsConsent}
         <div class="flex flex-col items-start gap-2 py-2.5 px-3 border-t border-line">
           {@render prefText(
