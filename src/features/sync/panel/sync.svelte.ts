@@ -39,6 +39,9 @@ const TORN_RETRY_MS = 5000;
 /** … but not forever — past this, the writer died mid-write; our copy wins. */
 const TORN_GIVE_UP_MS = 90_000;
 const RATE_LIMIT_RETRY_MS = 65_000;
+/** A reconcile that finds everything in order takes milliseconds; without a
+ * floor "Syncing…" comes and goes inside a frame and the button reads dead. */
+const MIN_VISIBLE_SYNC_MS = 600;
 /** Belt and braces: the change event should carry everything, but a missed
  * one must not mean a device stays stale until the next panel open. */
 const SAFETY_INTERVAL_MS = 5 * 60_000;
@@ -84,10 +87,12 @@ class SyncStore {
   /** Another device's changes are in, waiting for a moment without a track
    * loaded (applying reloads the panel). "Sync now" applies them at once. */
   pendingApply = $state(false);
-  #syncing = $state(false);
+  /** A depth, not a flag: "Sync now" holds it up for the minimum visible time
+   * around a reconcile that drops it as soon as it is done. */
+  #busy = $state(0);
 
   status = $derived<'off' | 'syncing' | 'error' | 'idle'>(
-    !this.enabled ? 'off' : this.#syncing ? 'syncing' : this.lastError ? 'error' : 'idle',
+    !this.enabled ? 'off' : this.#busy > 0 ? 'syncing' : this.lastError ? 'error' : 'idle',
   );
   usedPercent = $derived(
     this.usedBytes ? Math.max(1, Math.round((this.usedBytes / SYNC_QUOTA_BYTES) * 100)) : 0,
@@ -136,9 +141,21 @@ class SyncStore {
     await this.#saveConfig({ enabled: false });
   }
 
-  /** Back up now and pull in the other devices' changes, reload included. */
+  /** Back up now and pull in the other devices' changes, reload included.
+   * Usually there is nothing to carry — the panel reconciled when it opened
+   * and after every change since — so what the click has to show for itself
+   * is the status line: "Syncing…" for long enough to read, then a refreshed
+   * "Last synced just now". */
   async syncNow(): Promise<void> {
-    await this.#enqueue(() => this.#reconcile(true));
+    this.#busy++;
+    try {
+      await Promise.all([
+        this.#enqueue(() => this.#reconcile(true)),
+        new Promise((resolve) => setTimeout(resolve, MIN_VISIBLE_SYNC_MS)),
+      ]);
+    } finally {
+      this.#busy--;
+    }
   }
 
   /** The loaded track changed (wired to `session.onMediaChanged` by the panel
@@ -160,7 +177,7 @@ class SyncStore {
   async deleteRemote(): Promise<void> {
     await this.disable();
     await this.#enqueue(async () => {
-      this.#syncing = true;
+      this.#busy++;
       try {
         await clearSyncArea();
         this.usedBytes = 0;
@@ -169,7 +186,7 @@ class SyncStore {
         await this.#saveConfig({ lastError: syncErrorMessage(err) });
         throw err;
       } finally {
-        this.#syncing = false;
+        this.#busy--;
       }
     });
   }
@@ -216,7 +233,7 @@ class SyncStore {
    */
   async #reconcile(force = false) {
     if (!this.config.enabled) return;
-    this.#syncing = true;
+    this.#busy++;
     let applied = false;
     try {
       const { result, bytes } = await readSyncArea();
@@ -264,8 +281,12 @@ class SyncStore {
         // Remote is what we last saw (our own echo included).
         if (localChanged || this.config.pendingPush) {
           if (!this.#pushTooSoon()) await this.#push(await fit(local), localHash);
-        } else if (this.config.lastError) {
-          await this.#saveConfig({ lastError: null });
+        } else {
+          // Nothing to send and nothing to fetch: this device is in agreement
+          // with the synced copy as of now, which is what the status line
+          // reports. Recording it is the only visible outcome a "Sync now"
+          // that finds everything already in order can have.
+          await this.#saveConfig({ lastSyncedAt: Date.now(), lastError: null });
         }
         return;
       }
@@ -312,7 +333,7 @@ class SyncStore {
         await this.#push(fitted, mergedHash);
       } else {
         await this.#saveConfig({
-          lastSyncedAt: meta.at,
+          lastSyncedAt: Date.now(),
           lastRemoteHash: meta.h,
           lastLocalHash: mergedHash,
           pendingPush: false,
@@ -324,7 +345,7 @@ class SyncStore {
       await this.#saveConfig({ lastError: syncErrorMessage(err) });
       if (isRateLimited(err)) this.#reconcileIn(RATE_LIMIT_RETRY_MS);
     } finally {
-      this.#syncing = false;
+      this.#busy--;
       // Local data changed under the stores (same situation as an import).
       if (applied) location.reload();
     }

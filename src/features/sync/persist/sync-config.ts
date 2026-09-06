@@ -5,7 +5,8 @@ import { storage } from '#imports';
  * this device's bookkeeping. */
 export interface SyncConfig {
   enabled: boolean;
-  /** `exportedAt` of the last blob pushed or merged in; 0 = never synced. */
+  /** When this device was last in agreement with the synced copy — a push, a
+   * merge, or a reconcile that found nothing to do; 0 = never synced. */
   lastSyncedAt: number;
   /** Wall clock of the last local data change — this device's side of
    * "whose settings win" against a remote blob's clock. */
