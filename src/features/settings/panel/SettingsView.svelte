@@ -170,7 +170,7 @@
           'with the contents of this file? Your current data is lost.',
       );
       if (!ok) return;
-      await restoreBackup(backup);
+      await restoreBackup(backup, { asNew: true });
       // Every store reads storage once at start-up; a reload is the honest way
       // to get the whole panel — theme, open track, engine — onto new data.
       location.reload();

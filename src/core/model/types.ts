@@ -118,7 +118,8 @@ export interface TrackData {
   sequenceLoop: boolean;
   /** Count in on play and before each snippet repeat lap (not on section loop). */
   sequenceCountIn: boolean;
-  /** Cached chord/key chart from the last analysis run. null = never analyzed.
+  /** Cached chord/key chart from the last analysis run. Empty segments with a
+   * computedAt date mean deleted; null = never analyzed or trimmed from sync.
    * (null, not undefined — patches serialize over the port, dropping undefined.) */
   chordChart?: ChordChart | null;
   /** Chords panel switch. Kept apart from the chart so switching off hides the

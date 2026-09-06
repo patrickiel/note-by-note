@@ -5,7 +5,7 @@ import {
   parseBackupJson,
   type Backup,
 } from './backup-codec';
-import { mergeDeletions, pruneDeletions } from './deletions';
+import { mergeDeletions, pruneDeletions, reviveBackup } from './deletions';
 import {
   deletionsItem,
   eqPresetsItem,
@@ -83,10 +83,14 @@ export function parseBackup(text: string): Backup {
  * not carry — a restore reproduces the machine it came from rather than
  * merging into whatever is here. Host permissions are left untouched.
  * Deletion records are the one thing merged, not replaced: forgetting this
- * device's would let a sync merge resurrect what it had removed.
+ * device's would let a sync merge resurrect what it had removed. Manual file
+ * imports use `asNew` to re-add their contents; sync restores keep their dates.
  */
-export async function restoreBackup(backup: Backup): Promise<void> {
-  const deletions = await deletionsItem.getValue();
+export async function restoreBackup(backup: Backup, { asNew = false } = {}): Promise<void> {
+  const deletions = pruneDeletions(
+    mergeDeletions(await deletionsItem.getValue(), backup.deletions ?? {}), Date.now(),
+  );
+  if (asNew) backup = reviveBackup(backup, deletions);
   await removeAllTrackData();
   await Promise.all([
     settingsItem.setValue(backup.settings),
@@ -94,9 +98,7 @@ export async function restoreBackup(backup: Backup): Promise<void> {
     historyItem.setValue(backup.history),
     favoritesItem.setValue(backup.favorites),
     eqPresetsItem.setValue(backup.eqPresets),
-    deletionsItem.setValue(
-      pruneDeletions(mergeDeletions(deletions, backup.deletions ?? {}), Date.now()),
-    ),
+    deletionsItem.setValue(deletions),
     ...backup.tracks.map(saveTrackData),
   ]);
 }

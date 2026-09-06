@@ -10,7 +10,6 @@ import {
   presetDeletion,
   pruneDeletions,
 } from '../../../core/persist/deletions.ts';
-import { hasChart } from './fit.ts';
 import type { FavoriteEntry, HistoryEntry } from '../../../core/model/types';
 
 /**
@@ -24,8 +23,8 @@ import type { FavoriteEntry, HistoryEntry } from '../../../core/model/types';
  *     is the later of the two.
  *   - Track records: matched by key, the more recently edited wins outright —
  *     an emptied record is still a record, so clearing markers sticks. A
- *     winner without a chart adopts the other's: absent may mean "trimmed",
- *     and a chart is only ever replaced by re-analysis.
+ *     chart is chosen separately by computedAt: null may mean "trimmed", but
+ *     an empty, dated chart is an explicit deletion and beats older analysis.
  *   - Settings and UI prefs: the newer device's, as a whole. EQ presets: union
  *     by name, the later save of a shared name, deletions honoured.
  *
@@ -97,7 +96,12 @@ export function mergeBackups(
       loser.tracks,
       (t) => t.identity.key,
       undefined,
-      (w, l) => (!hasChart(w) && hasChart(l) ? { ...w, chordChart: l.chordChart } : w),
+      (w, l) => ({
+        ...w,
+        chordChart: !w.chordChart || (l.chordChart?.computedAt ?? 0) > w.chordChart.computedAt
+          ? l.chordChart ?? w.chordChart
+          : w.chordChart,
+      }),
     ),
     deletions,
   };

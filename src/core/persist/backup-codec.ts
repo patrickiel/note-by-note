@@ -1,5 +1,4 @@
 import {
-  DEFAULT_KEYMAP,
   DEFAULT_PARAMS,
   DEFAULT_SETTINGS,
   DEFAULT_UI_PREFS,
@@ -260,10 +259,6 @@ function keyedArr<T>(value: unknown, section: string): T[] {
   return list as T[];
 }
 
-function jsonEqual(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
-}
-
 /** Keys of `value` whose (JSON) value differs from `defaults`, recursing into
  * plain objects. Keys unknown to `defaults` are kept verbatim. */
 function diffPlain(
@@ -277,7 +272,7 @@ function diffPlain(
     if (isRecord(v) && isRecord(d)) {
       const nested = diffPlain(v, d);
       if (Object.keys(nested).length) out[key] = nested;
-    } else if (!(key in defaults) || !jsonEqual(v, d)) {
+    } else if (!(key in defaults) || JSON.stringify(v) !== JSON.stringify(d)) {
       out[key] = v;
     }
   }
@@ -331,16 +326,8 @@ export function encodeParams(p: EffectParams): CompactParams | undefined {
   return Object.keys(out).length ? out : undefined;
 }
 
-function defaultParams(): EffectParams {
-  return {
-    ...DEFAULT_PARAMS,
-    eq: { enabled: false, gains: [...DEFAULT_PARAMS.eq.gains] },
-    tuning: { ...DEFAULT_PARAMS.tuning },
-  };
-}
-
 export function decodeParams(raw: unknown, section: string): EffectParams {
-  const p = defaultParams();
+  const p = structuredClone(DEFAULT_PARAMS);
   if (raw === undefined) return p;
   const c = rec(raw, section);
   if (c.t !== undefined) p.transpose = num(c.t, section);
@@ -370,14 +357,9 @@ export function decodeParams(raw: unknown, section: string): EffectParams {
 // ---------------------------------------------------------------------------
 // Settings / UI prefs
 
-const SETTINGS_DEFAULTS: Record<string, unknown> = {
-  ...DEFAULT_SETTINGS,
-  keymap: { ...DEFAULT_KEYMAP },
-};
-
 export function encodeSettings(settings: Settings): Record<string, unknown> {
   const { lastUsedParams, ...rest } = settings;
-  const out = diffPlain(rest, SETTINGS_DEFAULTS);
+  const out = diffPlain(rest, { ...DEFAULT_SETTINGS });
   if (lastUsedParams) out.lp = encodeParams(lastUsedParams) ?? {};
   return out;
 }
@@ -385,7 +367,7 @@ export function encodeSettings(settings: Settings): Record<string, unknown> {
 export function decodeSettings(raw: unknown): Settings {
   const diff = raw === undefined ? {} : rec(raw, 'settings');
   const { lp, ...rest } = diff;
-  const settings = mergePlain(SETTINGS_DEFAULTS, rest) as unknown as Settings;
+  const settings = mergePlain({ ...DEFAULT_SETTINGS }, rest) as unknown as Settings;
   if (lp !== undefined) settings.lastUsedParams = decodeParams(lp, 'settings');
   return settings;
 }
@@ -693,9 +675,7 @@ function encodeTrack(track: TrackData, songs: SongTable): CompactTrack {
   if (track.sequenceLoop) out.L = 1;
   if (track.sequenceCountIn) out.C = 1;
   if (track.chordsEnabled !== undefined) out.ce = track.chordsEnabled ? 1 : 0;
-  if (track.chordChart && track.chordChart.segments?.length) {
-    out.ch = encodeChart(track.chordChart);
-  }
+  if (track.chordChart) out.ch = encodeChart(track.chordChart);
   return out;
 }
 
@@ -765,6 +745,13 @@ export function encodeBackup(backup: Backup): CompactBackup {
   return out;
 }
 
+/** Defaults alone need no sync blob; customized settings do, even without songs. */
+export function isEmptyBackup(backup: Backup): boolean {
+  const { songs, eq, s, u, del = {} } = encodeBackup(backup);
+  return songs.length === 0 && eq.length === 0 &&
+    Object.keys(s).length === 0 && Object.keys(u).length === 0 && Object.keys(del).length === 0;
+}
+
 /** Reads a compact (v2) backup, or throws an `Error` whose message is safe to
  * show the user. Unknown keys are ignored so the format can grow. */
 export function decodeBackup(raw: unknown): Backup {
@@ -783,9 +770,7 @@ export function decodeBackup(raw: unknown): Backup {
     favorites: arr(raw.f, 'favorites').map((e) => decodeFavorite(e, songs)),
     eqPresets: arr(raw.eq, 'eqPresets').map(decodeEqPreset),
     tracks: arr(raw.t, 'tracks').map((t) => decodeTrack(t, songs)),
-    deletions: Object.fromEntries(
-      Object.entries(normalizeDeletions(raw.del)).map(([k, when]) => [k, when]),
-    ),
+    deletions: normalizeDeletions(raw.del),
   };
 }
 

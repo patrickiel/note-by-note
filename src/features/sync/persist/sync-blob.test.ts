@@ -22,8 +22,9 @@ import {
   unpackBackup,
 } from './sync-blob.ts';
 import { fitBackup } from './fit.ts';
-import { BACKUP_FORMAT, encodeBackup, type Backup } from '../../../core/persist/backup-codec.ts';
-import { DEFAULT_PARAMS, DEFAULT_SETTINGS, DEFAULT_UI_PREFS } from '../../../core/model/defaults.ts';
+import { encodeBackup, type Backup } from '../../../core/persist/backup-codec.ts';
+import { backupFixture } from '../../../core/persist/backup.fixture.ts';
+import { DEFAULT_PARAMS } from '../../../core/model/defaults.ts';
 import { makeTrackIdentity } from '../../../core/model/track-identity.ts';
 import type { ChordChart, HistoryEntry, TrackData } from '../../../core/model/types.ts';
 
@@ -66,19 +67,7 @@ function library(n: number): Backup {
       updatedAt: T0 + i * 60_000,
     });
   }
-  return {
-    format: BACKUP_FORMAT,
-    version: 1,
-    exportedAt: T0,
-    appVersion: '1.0.3',
-    settings: DEFAULT_SETTINGS,
-    uiPrefs: DEFAULT_UI_PREFS,
-    history,
-    favorites: [],
-    eqPresets: [],
-    tracks,
-    deletions: {},
-  };
+  return backupFixture({ history, tracks, appVersion: '1.0.3' });
 }
 
 test('base64 round-trips every byte value and a large buffer', () => {

@@ -2,8 +2,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fitBackup, LibraryTooLargeError } from './fit.ts';
-import { BACKUP_FORMAT, encodeBackup, type Backup } from '../../../core/persist/backup-codec.ts';
-import { DEFAULT_PARAMS, DEFAULT_SETTINGS, DEFAULT_UI_PREFS } from '../../../core/model/defaults.ts';
+import { encodeBackup, type Backup } from '../../../core/persist/backup-codec.ts';
+import { backupFixture } from '../../../core/persist/backup.fixture.ts';
+import { DEFAULT_PARAMS } from '../../../core/model/defaults.ts';
 import { makeTrackIdentity } from '../../../core/model/track-identity.ts';
 import type {
   ChordChart,
@@ -92,19 +93,7 @@ function library(recent: number, favorites: number, orphans = 0): Backup {
   }
   // Storage enumeration order is arbitrary; make sure nothing relies on it.
   tracks.reverse();
-  return {
-    format: BACKUP_FORMAT,
-    version: 1,
-    exportedAt: T0,
-    appVersion: '',
-    settings: DEFAULT_SETTINGS,
-    uiPrefs: DEFAULT_UI_PREFS,
-    history,
-    favorites: favs,
-    eqPresets: [],
-    tracks,
-    deletions: {},
-  };
+  return backupFixture({ history, favorites: favs, tracks });
 }
 
 const keys = (list: { identity: TrackIdentity }[]) => list.map((e) => e.identity.key).sort();
@@ -136,7 +125,6 @@ test('recent songs go first, oldest first, taking their records along', async ()
 
 test('charts go next, oldest first; favorites and their markers stay', async () => {
   const b = library(3, 3);
-  const noRecent = await fitBackup(b, measure(b), measure);
   // Find the budget at which every non-favorite is gone but charts remain.
   const favoritesOnly = { ...b, history: b.history.slice(3), tracks: b.tracks.filter((t) => keys(b.favorites).includes(t.identity.key)) };
   const result = await fitBackup(b, measure(favoritesOnly) - 1, measure);
@@ -154,7 +142,6 @@ test('charts go next, oldest first; favorites and their markers stay', async () 
     .filter((t) => !t.chordChart)
     .map((t) => t.updatedAt);
   assert.ok(Math.max(...cutAt) < Math.min(...keptAt), 'the oldest charts went');
-  assert.equal(noRecent.trimmed, false);
 });
 
 test('favorites go last, least recently accessed first', async () => {

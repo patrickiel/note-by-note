@@ -94,8 +94,7 @@ class ChordsStore {
     this.#log(`analyze confirmed (${fromStart ? 'from start' : 'from here'}) — loading model`);
     this.phase = 'loading';
     this.loadError = false;
-    this.chart = null;
-    this.#persistNow();
+    this.clear();
     try {
       await this.#ensureEngine().ready();
     } catch (err) {
@@ -178,7 +177,11 @@ class ChordsStore {
 
   /** Delete the analyzed chords for this track (and the persisted copy). */
   clear() {
-    this.chart = null;
+    // An empty, dated chart is a deletion; null can also mean sync trimmed it.
+    this.chart = {
+      segments: [], key: null, coverage: 0, analyzedFrom: 0, analyzedTo: 0,
+      computedAt: Date.now(),
+    };
     this.#persistNow();
   }
 

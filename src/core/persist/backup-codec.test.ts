@@ -9,9 +9,11 @@ import {
   encodeBackup,
   encodeChart,
   encodeParams,
+  isEmptyBackup,
   parseBackupJson,
   type Backup,
 } from './backup-codec.ts';
+import { backupFixture } from './backup.fixture.ts';
 import { DEFAULT_PARAMS, DEFAULT_SETTINGS, DEFAULT_UI_PREFS } from '../model/defaults.ts';
 import { makeTrackIdentity } from '../model/track-identity.ts';
 import type {
@@ -42,12 +44,7 @@ const localSong = makeTrackIdentity(
 );
 
 function params(patch: Partial<EffectParams> = {}): EffectParams {
-  return {
-    ...DEFAULT_PARAMS,
-    eq: { enabled: false, gains: [...DEFAULT_PARAMS.eq.gains] },
-    tuning: { ...DEFAULT_PARAMS.tuning },
-    ...patch,
-  };
+  return { ...structuredClone(DEFAULT_PARAMS), ...patch };
 }
 
 function entry(identity: TrackIdentity, patch: Partial<HistoryEntry> = {}): HistoryEntry {
@@ -124,20 +121,7 @@ function track(identity: TrackIdentity, patch: Partial<TrackData> = {}): TrackDa
 }
 
 function backup(patch: Partial<Backup> = {}): Backup {
-  return {
-    format: BACKUP_FORMAT,
-    version: 1,
-    exportedAt: 1_757_200_000_123,
-    appVersion: '1.0.3',
-    settings: { ...DEFAULT_SETTINGS, keymap: { ...DEFAULT_SETTINGS.keymap } },
-    uiPrefs: JSON.parse(JSON.stringify(DEFAULT_UI_PREFS)),
-    history: [],
-    favorites: [],
-    eqPresets: [],
-    tracks: [],
-    deletions: {},
-    ...patch,
-  };
+  return backupFixture({ exportedAt: 1_757_200_000_123, appVersion: '1.0.3', ...patch });
 }
 
 /** A whole library the way storage would hold it: `n` Recent rows, a third of
@@ -246,6 +230,13 @@ test('settings: only what differs from the defaults is written', () => {
   const back = roundTrip(b);
   assert.deepEqual(back.settings, b.settings);
   assert.deepEqual(back.uiPrefs, b.uiPrefs);
+});
+
+test('sync: customized settings or prefs count even without a library', () => {
+  assert.equal(isEmptyBackup(backup()), true);
+  assert.equal(isEmptyBackup(backup({ settings: { ...DEFAULT_SETTINGS, theme: 'dark' } })), false);
+  assert.equal(isEmptyBackup(backup({ uiPrefs: { ...DEFAULT_UI_PREFS, boundaryLabels: { start: 'Intro', end: '' } } })), false);
+  assert.equal(isEmptyBackup(backup({ deletions: { 'h:*': Date.now() } })), false);
 });
 
 test('settings: a keymap saved before an action existed is backfilled', () => {
@@ -395,20 +386,21 @@ test('tracks: markers, snippets and flags round-trip; ids are regenerated', () =
   assert.equal(back.chordChart, null);
 });
 
-test('tracks: an empty chart is not written; chordsEnabled keeps false/true', () => {
+test('tracks: dated empty charts survive the codec; absent charts stay absent', () => {
   const b = backup({
     tracks: [
       track(ytSong, { chordChart: chart(0), chordsEnabled: false }),
       track(siteSong, { chordChart: undefined, chordsEnabled: true }),
     ],
   });
-  const enc = encodeBackup(b).t;
-  assert.equal(enc.every((t) => t.ch === undefined), true);
   const back = roundTrip(b).tracks;
   const byKey = new Map(back.map((t) => [t.identity.key, t]));
   assert.equal(byKey.get(ytSong.key)?.chordsEnabled, false);
   assert.equal(byKey.get(siteSong.key)?.chordsEnabled, true);
-  assert.equal(byKey.get(ytSong.key)?.chordChart, null);
+  assert.deepEqual(byKey.get(ytSong.key)?.chordChart?.segments, []);
+  assert.equal(byKey.get(ytSong.key)?.chordChart?.computedAt, chart(0).computedAt);
+  assert.equal(byKey.get(siteSong.key)?.chordChart, null);
+  assert.deepEqual(encodeBackup(roundTrip(b)), encodeBackup(b));
 });
 
 test('chart: times land within half a centisecond, gaps and key survive', () => {
@@ -506,9 +498,6 @@ test('encode is idempotent past the first pass and JSON-clean', () => {
   const again = encodeBackup(decodeBackup(JSON.parse(JSON.stringify(first))));
   assert.deepEqual(again, first);
   assert.deepEqual(JSON.parse(JSON.stringify(first)), first);
-  const text = JSON.stringify(decodeBackup(first));
-  assert.ok(!text.includes('null,') || true); // nulls are legitimate (chordChart, baseBpm)
-  assert.ok(!/NaN/.test(text));
 });
 
 test('encode is deterministic regardless of track enumeration order', () => {

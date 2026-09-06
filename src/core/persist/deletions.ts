@@ -19,6 +19,8 @@
  * Pure and DOM-free (relative `.ts` imports; runs under `node --test`).
  */
 
+import type { Backup } from './backup-codec.ts';
+
 export type Deletions = Record<string, number>;
 
 export const historyDeletion = (songKey: string) => `h:${songKey}`;
@@ -57,9 +59,26 @@ export function pruneDeletions(deletions: Deletions, now: number): Deletions {
 /** Anything a file or a remote copy claims to be deletions, made safe. */
 export function normalizeDeletions(raw: unknown): Deletions {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {};
-  const out: Deletions = {};
-  for (const [key, when] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof when === 'number' && Number.isFinite(when) && when > 0) out[key] = when;
-  }
-  return out;
+  return Object.fromEntries(Object.entries(raw).filter(
+    ([, when]) => typeof when === 'number' && Number.isFinite(when) && when > 0,
+  ));
+}
+
+/** A manual import is a new edit. Keep deletion records for absent items,
+ * but date restored items after them so the next sync cannot delete them. */
+export function reviveBackup(backup: Backup, deletions: Deletions, now = Date.now()): Backup {
+  const updatedAt = Math.max(now, backup.exportedAt, ...Object.values(deletions)) + 1;
+  return {
+    ...backup,
+    exportedAt: updatedAt,
+    history: backup.history.map((e) => ({ ...e, updatedAt })),
+    favorites: backup.favorites.map((e) => ({ ...e, updatedAt })),
+    eqPresets: backup.eqPresets.map((e) => ({ ...e, updatedAt })),
+    tracks: backup.tracks.map((t) => ({
+      ...t,
+      updatedAt,
+      chordChart: t.chordChart ? { ...t.chordChart, computedAt: updatedAt } : t.chordChart,
+    })),
+    deletions,
+  };
 }

@@ -1,4 +1,4 @@
-import { encodeBackup } from '../../../core/persist/backup-codec';
+import { encodeBackup, isEmptyBackup } from '../../../core/persist/backup-codec';
 import { createBackup, restoreBackup, type Backup } from '../../../core/persist/backup';
 import { session } from '../../../core/state/session.svelte';
 import { fitBackup, type FitResult } from '../persist/fit';
@@ -48,16 +48,6 @@ const SYNCED_KEY_RE = /^(settings|uiPrefs|history|favorites|eqPresets|deletions|
 
 const measure = (backup: Backup) => packedChars(encodeBackup(backup));
 const fit = (backup: Backup) => fitBackup(backup, BUDGET_CHARS, measure);
-
-function isEmpty(backup: Backup): boolean {
-  return (
-    backup.history.length === 0 &&
-    backup.favorites.length === 0 &&
-    backup.tracks.length === 0 &&
-    backup.eqPresets.length === 0 &&
-    Object.keys(backup.deletions ?? {}).length === 0
-  );
-}
 
 /**
  * Cross-device sync through the browser's own synced storage — no server,
@@ -226,7 +216,7 @@ class SyncStore {
       this.#tornSince = 0;
 
       if (result.kind === 'none') {
-        if (isEmpty(local) && !this.config.pendingPush) return;
+        if (isEmptyBackup(local) && !this.config.pendingPush) return;
         await this.#push(await fit(local), localHash);
         return;
       }

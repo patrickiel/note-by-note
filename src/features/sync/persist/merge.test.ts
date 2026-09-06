@@ -2,14 +2,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mergeBackups } from './merge.ts';
-import { BACKUP_FORMAT, type Backup } from '../../../core/persist/backup-codec.ts';
+import { backupFixture as backup } from '../../../core/persist/backup.fixture.ts';
 import {
   favoriteDeletion,
   HISTORY_CLEARED,
   historyDeletion,
   presetDeletion,
+  reviveBackup,
 } from '../../../core/persist/deletions.ts';
-import { DEFAULT_PARAMS, DEFAULT_SETTINGS, DEFAULT_UI_PREFS, HISTORY_LIMIT } from '../../../core/model/defaults.ts';
+import { DEFAULT_PARAMS, DEFAULT_SETTINGS, HISTORY_LIMIT } from '../../../core/model/defaults.ts';
 import { makeTrackIdentity, songKey } from '../../../core/model/track-identity.ts';
 import type { ChordChart, FavoriteEntry, HistoryEntry, TrackData, TrackIdentity } from '../../../core/model/types.ts';
 
@@ -51,23 +52,6 @@ function record(identity: TrackIdentity, updatedAt: number, markers: number, wit
     sequenceCountIn: false,
     chordChart: withChart ? chart(updatedAt) : null,
     updatedAt,
-  };
-}
-
-function backup(patch: Partial<Backup> = {}): Backup {
-  return {
-    format: BACKUP_FORMAT,
-    version: 1,
-    exportedAt: T0,
-    appVersion: '',
-    settings: { ...DEFAULT_SETTINGS },
-    uiPrefs: JSON.parse(JSON.stringify(DEFAULT_UI_PREFS)),
-    history: [],
-    favorites: [],
-    eqPresets: [],
-    tracks: [],
-    deletions: {},
-    ...patch,
   };
 }
 
@@ -156,6 +140,33 @@ test('tracks: a winner without a chart adopts the other side’s', () => {
   const merged = mergeBackups(local, remote, false, NOW);
   assert.equal(merged.tracks[0].markers.length, 3);
   assert.ok(merged.tracks[0].chordChart?.segments.length);
+});
+
+test('a deleted chart beats stale analysis and later marker edits, but allows re-analysis', () => {
+  const deleted = backup({ tracks: [{ ...record(song(1), T0 + 1, 0), chordChart: { ...chart(T0 + 1), segments: [] } }] });
+  const stale = backup({ tracks: [{ ...record(song(1), T0 + 2, 3), chordChart: chart(T0) }] });
+  for (const remoteWins of [false, true]) {
+    const merged = mergeBackups(deleted, stale, remoteWins, NOW);
+    assert.equal(merged.tracks[0].markers.length, 3);
+    assert.deepEqual(merged.tracks[0].chordChart?.segments, []);
+    stale.tracks[0].chordChart = chart(T0 + 3);
+    assert.equal(mergeBackups(merged, stale, remoteWins, NOW).tracks[0].chordChart?.computedAt, T0 + 3);
+    stale.tracks[0].chordChart = chart(T0);
+  }
+});
+
+test('a manual import re-adds deleted rows and presets without reviving absent items', () => {
+  const del = { [HISTORY_CLEARED]: NOW, [favoriteDeletion(songKey(song(1)))]: NOW, [presetDeletion('Mine')]: NOW };
+  const file = backup({ history: [row(song(1), T0)], favorites: [fav(song(1), T0)], eqPresets: [{ name: 'Mine', gains: [1] }] });
+  const restored = reviveBackup(file, del, NOW);
+  const remote = backup({ deletions: del, history: [row(song(2), T0)] });
+  for (const remoteWins of [false, true]) {
+    const merged = mergeBackups(restored, remote, remoteWins, NOW);
+    assert.deepEqual(keys(merged.history), [song(1).key]);
+    assert.deepEqual(keys(merged.favorites), [song(1).key]);
+    assert.equal(merged.eqPresets[0].name, 'Mine');
+  }
+  assert.equal(file.history[0].updatedAt, T0, 'the original backup is unchanged');
 });
 
 test('ties go to the winning side', () => {
