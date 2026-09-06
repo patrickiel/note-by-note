@@ -63,6 +63,13 @@ export function identityKey(normalizedUrl: string, durationSec: number): string 
   return `${hash(normalizedUrl)}:${durationSec}`;
 }
 
+/** A short handle for what `isSameTrack` compares — URL and title, no
+ * duration — so a record about "this song" (a sync deletion, say) reaches
+ * every copy of it however its duration drifted. */
+export function songKey(identity: Pick<TrackIdentity, 'normalizedUrl' | 'title'>): string {
+  return hash(`${identity.normalizedUrl}\n${identity.title}`);
+}
+
 export function makeTrackIdentity(
   pageUrl: string,
   title: string,

@@ -132,7 +132,10 @@ class TrackSync {
       // the stale identity gets another go now the duration has settled.
       if (!adjusted) this.#restoreSaved(identity);
       if (adjusted) {
-        await removeHistoryEntry(staleKey);
+        // Housekeeping, not a user deletion: the song stays, only its
+        // stale-keyed twin goes — so no deletion record (which is per song
+        // and would kill the fresh row on the other devices).
+        await removeHistoryEntry(staleKey, { record: false });
         await this.#saveCurrent();
         // Only carry the stale key's slice over when the real key has none, so
         // this can't overwrite a saved record with an emptied one.

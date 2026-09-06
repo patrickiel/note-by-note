@@ -93,6 +93,16 @@ export async function recordDeletion(...keys: string[]): Promise<void> {
   await deletionsItem.setValue(pruneDeletions(next, now));
 }
 
+/** Forgets a deletion — the item was re-created here, and a record dated
+ * after its re-creation on another device would kill it in the merge. */
+export async function clearDeletion(...keys: string[]): Promise<void> {
+  const current = await deletionsItem.getValue();
+  if (!keys.some((key) => key in current)) return;
+  const next = { ...current };
+  for (const key of keys) delete next[key];
+  await deletionsItem.setValue(next);
+}
+
 /** Per-track markers/snippets, keyed by TrackIdentity.key. */
 export function trackDataKey(key: string) {
   return `local:track:${key}` as const;

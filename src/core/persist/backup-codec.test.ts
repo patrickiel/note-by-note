@@ -255,10 +255,20 @@ test('settings: a keymap saved before an action existed is backfilled', () => {
   assert.equal(roundTrip(b).settings.keymap.zoomFit, DEFAULT_SETTINGS.keymap.zoomFit);
 });
 
-test('eq presets round-trip as tuples', () => {
-  const b = backup({ eqPresets: [{ name: 'Mine', gains: [1, 2.5, 3, 4, 5, 6, 7, 8, 9, 0] }] });
-  assert.deepEqual(encodeBackup(b).eq, [['Mine', 1, 2.5, 3, 4, 5, 6, 7, 8, 9, 0]]);
-  assert.deepEqual(roundTrip(b).eqPresets, b.eqPresets);
+test('eq presets round-trip as tuples, with or without a save time', () => {
+  const b = backup({
+    eqPresets: [
+      { name: 'Mine', gains: [1, 2.5, 3, 4, 5, 6, 7, 8, 9, 0] },
+      { name: 'Stamped', gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 1], updatedAt: 1_757_112_345_678 },
+    ],
+  });
+  assert.deepEqual(encodeBackup(b).eq, [
+    ['Mine', [1, 2.5, 3, 4, 5, 6, 7, 8, 9, 0]],
+    ['Stamped', [0, 0, 0, 0, 0, 0, 0, 0, 0, 1], 1757112346],
+  ]);
+  const back = roundTrip(b).eqPresets;
+  assert.deepEqual(back[0], b.eqPresets[0]);
+  assert.deepEqual(back[1], { ...b.eqPresets[1], updatedAt: 1757112346000 });
 });
 
 // ---------------------------------------------------------------------------

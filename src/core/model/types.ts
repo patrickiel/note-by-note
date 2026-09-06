@@ -37,6 +37,9 @@ export interface EffectParams {
 export interface EqPreset {
   name: string;
   gains: number[];
+  /** Last save. Absent on presets from before sync merged; reads as 0, so a
+   * dated deletion (deletions.ts) beats them and a later save beats it. */
+  updatedAt?: number;
 }
 
 export interface Marker {

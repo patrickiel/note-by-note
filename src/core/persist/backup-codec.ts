@@ -134,6 +134,9 @@ export interface CompactFavorite extends CompactEntry {
   la: number;
 }
 
+/** `[name, gains, updatedAt_s?]`. */
+export type CompactEqPreset = [string, number[]] | [string, number[], number];
+
 /** `[t_ms, label?]` — label omitted when empty. */
 export type CompactMarker = [number] | [number, string];
 
@@ -192,8 +195,8 @@ export interface CompactBackup {
   s: Record<string, unknown>;
   /** UI prefs that differ from the defaults. */
   u: Record<string, unknown>;
-  /** `[name, ...gains]` per saved EQ preset. */
-  eq: (string | number)[][];
+  /** `[name, gains, updatedAt_s?]` per saved EQ preset. */
+  eq: CompactEqPreset[];
   songs: CompactSong[];
   h: CompactEntry[];
   f: CompactFavorite[];
@@ -722,14 +725,22 @@ function decodeTrack(raw: unknown, songs: TrackIdentity[]): TrackData {
 // ---------------------------------------------------------------------------
 // Whole backup
 
-function encodeEqPreset(preset: EqPreset): (string | number)[] {
-  return [preset.name ?? '', ...(preset.gains ?? []).map(round2)];
+/** `[name, gains, updatedAt_s?]`. */
+function encodeEqPreset(preset: EqPreset): CompactEqPreset {
+  const name = preset.name ?? '';
+  const gains = (preset.gains ?? []).map(round2);
+  return preset.updatedAt ? [name, gains, secs(preset.updatedAt)] : [name, gains];
 }
 
 function decodeEqPreset(raw: unknown): EqPreset {
   const r = arr(raw, 'eqPresets');
-  if (r.length < 1) throw damaged('eqPresets');
-  return { name: str(r[0], 'eqPresets'), gains: r.slice(1).map((g) => num(g, 'eqPresets')) };
+  if (r.length < 2 || r.length > 3) throw damaged('eqPresets');
+  const preset: EqPreset = {
+    name: str(r[0], 'eqPresets'),
+    gains: arr(r[1], 'eqPresets').map((g) => num(g, 'eqPresets')),
+  };
+  if (r.length === 3) preset.updatedAt = num(r[2], 'eqPresets') * 1000;
+  return preset;
 }
 
 const byKey = (a: { identity: TrackIdentity }, b: { identity: TrackIdentity }) =>

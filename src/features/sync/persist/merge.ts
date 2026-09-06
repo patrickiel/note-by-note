@@ -4,8 +4,10 @@ import {
   favoriteDeleted,
   historyDeleted,
   mergeDeletions,
+  presetDeleted,
   pruneDeletions,
 } from '../../../core/persist/deletions.ts';
+import { songKey } from '../../../core/model/track-identity.ts';
 import type {
   EqPreset,
   FavoriteEntry,
@@ -27,7 +29,8 @@ import type {
  *     winner without a chart adopts the other's: absent may mean "trimmed",
  *     and a chart is only ever replaced by re-analysis.
  *   - Settings and UI prefs: the newer device's, as a whole. EQ presets: union
- *     by name, the newer device's order first.
+ *     by name, the later save of a shared name, deletions honoured, the newer
+ *     device's order first.
  *
  * `remoteWins` breaks ties and picks the wholesale sections: true when the
  * remote copy was written after this device's last local change. Pure;
@@ -46,7 +49,7 @@ function mergeHistory(
 ): HistoryEntry[] {
   const bySong = new Map<string, HistoryEntry>();
   for (const entry of [...first, ...second]) {
-    if (historyDeleted(deletions, entry.identity.key, entry.updatedAt ?? 0)) continue;
+    if (historyDeleted(deletions, songKey(entry.identity), entry.updatedAt ?? 0)) continue;
     const id = songId(entry.identity);
     const current = bySong.get(id);
     if (!current || (entry.updatedAt ?? 0) > (current.updatedAt ?? 0)) bySong.set(id, entry);
@@ -63,7 +66,7 @@ function mergeFavorites(
   const bySong = new Map<string, FavoriteEntry>();
   for (const entry of [...first, ...second]) {
     const since = Math.max(entry.favoritedAt ?? 0, entry.updatedAt ?? 0);
-    if (favoriteDeleted(deletions, entry.identity.key, since)) continue;
+    if (favoriteDeleted(deletions, songKey(entry.identity), since)) continue;
     const id = songId(entry.identity);
     const current = bySong.get(id);
     if (!current) {
@@ -100,10 +103,21 @@ function mergeTracks(first: TrackData[], second: TrackData[]): TrackData[] {
   return [...byKey.values()];
 }
 
-function mergeEqPresets(first: EqPreset[], second: EqPreset[]): EqPreset[] {
+/** Union by name; a dated deletion beats any copy it postdates, and a shared
+ * name goes to the later save (the winner side on a tie, or when neither
+ * carries a save time). */
+function mergeEqPresets(
+  first: EqPreset[],
+  second: EqPreset[],
+  deletions: Backup['deletions'],
+): EqPreset[] {
   const byName = new Map<string, EqPreset>();
   for (const preset of [...first, ...second]) {
-    if (!byName.has(preset.name)) byName.set(preset.name, preset);
+    if (presetDeleted(deletions, preset.name, preset.updatedAt ?? 0)) continue;
+    const current = byName.get(preset.name);
+    if (!current || (preset.updatedAt ?? 0) > (current.updatedAt ?? 0)) {
+      byName.set(preset.name, preset);
+    }
   }
   return [...byName.values()];
 }
@@ -121,7 +135,7 @@ export function mergeBackups(
     exportedAt: Math.max(local.exportedAt ?? 0, remote.exportedAt ?? 0),
     settings: winner.settings,
     uiPrefs: winner.uiPrefs,
-    eqPresets: mergeEqPresets(winner.eqPresets, loser.eqPresets),
+    eqPresets: mergeEqPresets(winner.eqPresets, loser.eqPresets, deletions),
     history: mergeHistory(winner.history, loser.history, deletions),
     favorites: mergeFavorites(winner.favorites, loser.favorites, deletions),
     tracks: mergeTracks(winner.tracks, loser.tracks),

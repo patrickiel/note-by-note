@@ -7,9 +7,10 @@ import {
   favoriteDeletion,
   HISTORY_CLEARED,
   historyDeletion,
+  presetDeletion,
 } from '../../../core/persist/deletions.ts';
 import { DEFAULT_PARAMS, DEFAULT_SETTINGS, DEFAULT_UI_PREFS, HISTORY_LIMIT } from '../../../core/model/defaults.ts';
-import { makeTrackIdentity } from '../../../core/model/track-identity.ts';
+import { makeTrackIdentity, songKey } from '../../../core/model/track-identity.ts';
 import type { ChordChart, FavoriteEntry, HistoryEntry, TrackData, TrackIdentity } from '../../../core/model/types.ts';
 
 const T0 = 1_757_000_000_000;
@@ -90,7 +91,7 @@ test('history is matched by song, so a drifted duration does not make a twin', (
 
 test('a deletion beats the copy it postdates, but not a later re-play', () => {
   const gone = song(1);
-  const local = backup({ deletions: { [historyDeletion(gone.key)]: T0 + 2000 } });
+  const local = backup({ deletions: { [historyDeletion(songKey(gone))]: T0 + 2000 } });
   const remote = backup({ history: [row(gone, T0 + 1000), row(song(2), T0)] });
   assert.deepEqual(keys(mergeBackups(local, remote, true, NOW).history), [song(2).key]);
   const replayed = backup({ history: [row(gone, T0 + 3000)] });
@@ -121,7 +122,7 @@ test('favorites: union in the winner order, deletions honoured, last access kept
   const c = song(3);
   const local = backup({
     favorites: [fav(b, T0, T0 + 9000), fav(a, T0)],
-    deletions: { [favoriteDeletion(c.key)]: T0 + 100 },
+    deletions: { [favoriteDeletion(songKey(c))]: T0 + 100 },
   });
   const remote = backup({ favorites: [fav(a, T0 + 1), fav(c, T0)] });
   const merged = mergeBackups(local, remote, true, NOW);
@@ -165,6 +166,47 @@ test('ties go to the winning side', () => {
   assert.equal(mergeBackups(local, remote, true, NOW).tracks[0].markers.length, 2);
   assert.equal(mergeBackups(local, remote, false, NOW).history[0].params.transpose, 1);
   assert.equal(mergeBackups(local, remote, false, NOW).tracks[0].markers.length, 1);
+});
+
+test('a deletion reaches every copy of the song, whatever duration it was saved under', () => {
+  const url = 'https://www.youtube.com/watch?v=drifted0001';
+  const s201 = makeTrackIdentity(url, 'Song', 201);
+  const s200 = makeTrackIdentity(url, 'Song', 200);
+  assert.notEqual(s201.key, s200.key);
+  const local = backup({
+    deletions: {
+      [historyDeletion(songKey(s201))]: T0 + 5000,
+      [favoriteDeletion(songKey(s201))]: T0 + 5000,
+    },
+  });
+  const remote = backup({ history: [row(s200, T0)], favorites: [fav(s200, T0)] });
+  const merged = mergeBackups(local, remote, false, NOW);
+  assert.equal(merged.history.length, 0);
+  assert.equal(merged.favorites.length, 0);
+  // A different song at the same URL (local files share one) is untouched.
+  const other = makeTrackIdentity(url, 'Other song', 200);
+  const kept = mergeBackups(local, backup({ history: [row(other, T0)] }), false, NOW);
+  assert.equal(kept.history.length, 1);
+});
+
+test('a deleted EQ preset stays deleted; a later save of the name brings it back', () => {
+  const gains = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  const deleter = backup({ deletions: { [presetDeletion('Mine')]: T0 + 2000 } });
+  const keeper = backup({ eqPresets: [{ name: 'Mine', gains, updatedAt: T0 + 1000 }] });
+  assert.deepEqual(mergeBackups(deleter, keeper, false, NOW).eqPresets, []);
+  assert.deepEqual(mergeBackups(deleter, keeper, true, NOW).eqPresets, [], 'even when the keeper wins');
+  const unstamped = backup({ eqPresets: [{ name: 'Mine', gains }] });
+  assert.deepEqual(mergeBackups(deleter, unstamped, true, NOW).eqPresets, [], 'an undated preset loses to any deletion');
+  const resaved = backup({ eqPresets: [{ name: 'Mine', gains, updatedAt: T0 + 3000 }] });
+  assert.equal(mergeBackups(deleter, resaved, false, NOW).eqPresets.length, 1);
+  assert.equal(mergeBackups(deleter, resaved, false, NOW).deletions[presetDeletion('Mine')], T0 + 2000, 'the record still travels');
+});
+
+test('a shared preset name goes to the later save', () => {
+  const local = backup({ eqPresets: [{ name: 'Mine', gains: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0], updatedAt: T0 + 5 }] });
+  const remote = backup({ eqPresets: [{ name: 'Mine', gains: [2, 0, 0, 0, 0, 0, 0, 0, 0, 0], updatedAt: T0 + 1 }] });
+  assert.equal(mergeBackups(local, remote, true, NOW).eqPresets[0].gains[0], 1, 'later save beats the winner side');
+  assert.equal(mergeBackups(local, remote, false, NOW).eqPresets[0].gains[0], 1);
 });
 
 test('settings and prefs come from the winner; EQ presets are a union', () => {
