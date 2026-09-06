@@ -1,7 +1,8 @@
 import { HISTORY_LIMIT } from '../../../core/model/defaults';
 import type { EffectParams, HistoryEntry, TrackIdentity } from '../../../core/model/types';
-import { isSameTrack } from '../../../core/model/track-identity';
-import { historyItem } from '../../../core/persist/storage';
+import { isSameTrack, songKey } from '../../../core/model/track-identity';
+import { HISTORY_CLEARED, historyDeletion } from '../../../core/persist/deletions';
+import { historyItem, recordDeletion } from '../../../core/persist/storage';
 
 /** Insert or refresh a Recent entry (newest first, LRU-capped).
  *
@@ -46,11 +47,22 @@ export async function dedupeHistory(): Promise<void> {
   if (kept.length !== list.length) await historyItem.setValue(kept);
 }
 
-export async function removeHistoryEntry(key: string): Promise<void> {
+/** The user removed a row: dated (`deletions.ts`, by song — every copy of it
+ * on every device, whatever duration it was saved under) so a sync merge with
+ * another device's older copy doesn't bring it back. `record: false` is for
+ * housekeeping that drops a stale twin of a song that stays — recording that
+ * would kill the song's fresh row on the other devices. */
+export async function removeHistoryEntry(
+  key: string,
+  { record = true }: { record?: boolean } = {},
+): Promise<void> {
   const list = await historyItem.getValue();
+  const entry = list.find((e) => e.identity.key === key);
   await historyItem.setValue(list.filter((e) => e.identity.key !== key));
+  if (record && entry) await recordDeletion(historyDeletion(songKey(entry.identity)));
 }
 
 export async function clearHistory(): Promise<void> {
   await historyItem.setValue([]);
+  await recordDeletion(HISTORY_CLEARED);
 }

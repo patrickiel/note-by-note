@@ -1,6 +1,7 @@
 import type { EffectParams, HistoryEntry, TrackIdentity } from '../../../core/model/types';
-import { isSameTrack } from '../../../core/model/track-identity';
-import { favoritesItem } from '../../../core/persist/storage';
+import { isSameTrack, songKey } from '../../../core/model/track-identity';
+import { favoriteDeletion } from '../../../core/persist/deletions';
+import { favoritesItem, recordDeletion } from '../../../core/persist/storage';
 
 /** Star a song: copy the history entry into the Favorites library (top of the
  * manual order). No-op if already favorited. */
@@ -16,9 +17,14 @@ export async function addFavorite(entry: HistoryEntry): Promise<void> {
   ]);
 }
 
+/** Dated (`deletions.ts`, by song — every copy of it, whatever duration it
+ * was saved under) so a sync merge with another device's older copy doesn't
+ * star the song again. */
 export async function removeFavorite(key: string): Promise<void> {
   const list = await favoritesItem.getValue();
+  const entry = list.find((e) => e.identity.key === key);
   await favoritesItem.setValue(list.filter((e) => e.identity.key !== key));
+  if (entry) await recordDeletion(favoriteDeletion(songKey(entry.identity)));
 }
 
 /** Persist a new manual order (list of identity keys, complete). */

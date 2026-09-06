@@ -24,13 +24,13 @@ files.
 
 ```powershell
 pnpm check      # svelte-check / TypeScript — the only type or lint gate
-pnpm test:dsp   # node --test, the DSP unit tests
+pnpm test:dsp   # node --test, the unit tests (DSP, chords, backup codec, sync fit)
 pnpm build      # production build → .output/chrome-mv3
 ```
 
-CI runs all three on every pull request, plus the Firefox build and `server/`'s
-own `pnpm run check`. Run them locally first anyway; the
-turnaround is much faster than waiting on a runner. (A first-time contributor's
+CI runs all three on every pull request, plus the Firefox build. Run them
+locally first anyway; the turnaround is much faster than waiting on a runner.
+(A first-time contributor's
 workflow run needs a maintainer to click approve, so it may sit for a bit.)
 There is no ESLint or Prettier config, deliberately — match the style of the
 code around you.

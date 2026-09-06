@@ -1,5 +1,6 @@
 import { storage, type StorageItemKey, type WxtStorageItem } from '#imports';
 import { DEFAULT_SETTINGS, DEFAULT_UI_PREFS } from '../model/defaults';
+import { pruneDeletions, type Deletions } from './deletions';
 import type {
   EqPreset,
   FavoriteEntry,
@@ -76,6 +77,22 @@ export const grantedOriginsItem = defineItem<string[]>('local:grantedOrigins', {
   fallback: [],
 });
 
+/** What the user deleted and when, so a sync merge doesn't bring it back —
+ * see `deletions.ts`. Part of the backup; never part of "Reset Settings". */
+export const deletionsItem = defineItem<Deletions>('local:deletions', {
+  fallback: {},
+});
+
+/** Dates a deletion (`historyDeletion(key)`, `favoriteDeletion(key)`,
+ * `HISTORY_CLEARED`) at now, pruning expired records on the way. */
+export async function recordDeletion(...keys: string[]): Promise<void> {
+  const now = Date.now();
+  const current = await deletionsItem.getValue();
+  const next = { ...current };
+  for (const key of keys) next[key] = now;
+  await deletionsItem.setValue(pruneDeletions(next, now));
+}
+
 /** Per-track markers/snippets, keyed by TrackIdentity.key. */
 export function trackDataKey(key: string) {
   return `local:track:${key}` as const;
@@ -89,8 +106,15 @@ export async function saveTrackData(data: TrackData): Promise<void> {
   await storage.setItem(trackDataKey(data.identity.key), toPlain(data));
 }
 
-export async function removeAllTrackData(): Promise<void> {
+/** Drops every stored track record whose identity key isn't in `keep` — a
+ * restore replaces the set of records rather than merging into it. Written
+ * as "remove what's left over" (rather than wiping first) so the records are
+ * only ever gone once their replacements are in: a restore interrupted
+ * halfway leaves stale records behind, never an empty library. */
+export async function removeTrackDataExcept(keep: Set<string>): Promise<void> {
   const snapshot = await browser.storage.local.get(null);
-  const keys = Object.keys(snapshot).filter((k) => k.startsWith('track:'));
-  if (keys.length) await browser.storage.local.remove(keys);
+  const stale = Object.keys(snapshot).filter(
+    (k) => k.startsWith('track:') && !keep.has(k.slice('track:'.length)),
+  );
+  if (stale.length) await browser.storage.local.remove(stale);
 }

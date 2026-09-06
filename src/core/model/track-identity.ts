@@ -56,6 +56,20 @@ export function isSameTrack(a: TrackIdentity, b: TrackIdentity): boolean {
   return a.normalizedUrl === b.normalizedUrl && a.title === b.title;
 }
 
+/** The storage key of a track: `${hash(normalizedUrl)}:${durationSec}`, with
+ * `durationSec` already rounded. Exported so a compact backup can leave the key
+ * out and rebuild it from the two strings it stores anyway (backup-codec.ts). */
+export function identityKey(normalizedUrl: string, durationSec: number): string {
+  return `${hash(normalizedUrl)}:${durationSec}`;
+}
+
+/** A short handle for what `isSameTrack` compares — URL and title, no
+ * duration — so a record about "this song" (a sync deletion, say) reaches
+ * every copy of it however its duration drifted. */
+export function songKey(identity: Pick<TrackIdentity, 'normalizedUrl' | 'title'>): string {
+  return hash(`${identity.normalizedUrl}\n${identity.title}`);
+}
+
 export function makeTrackIdentity(
   pageUrl: string,
   title: string,
@@ -64,7 +78,7 @@ export function makeTrackIdentity(
   const normalizedUrl = normalizeUrl(pageUrl);
   const duration = Number.isFinite(durationSec) ? Math.round(durationSec) : 0;
   return {
-    key: `${hash(normalizedUrl)}:${duration}`,
+    key: identityKey(normalizedUrl, duration),
     normalizedUrl,
     title: cleanTitle(title),
     durationSec: duration,

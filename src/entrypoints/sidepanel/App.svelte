@@ -32,6 +32,9 @@
           console.error('[note-by-note] track sync failed', err);
         });
       };
+      // Applying another device's changes reloads this document, so a merge
+      // that arrived mid-practice waits for the track to go away.
+      session.onMediaChanged = (media) => sync.onMedia(media);
       session.onUserParamsChange = () => trackSync.onParamsChanged();
       session.onEngineDetached = () => trackSync.onEngineLost();
       // Diagnostics for the E2E harness; kept out of release builds.

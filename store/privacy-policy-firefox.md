@@ -17,9 +17,9 @@ Uninstalling the extension removes all of it. Settings → Reset Settings clears
 
 **What is transmitted, and when**
 
-The extension makes exactly one kind of network request: the optional cross-device sync backup. Nothing else in the extension talks to the network.
+The extension makes no network requests of its own. The one thing that leaves your device is the optional cross-device sync copy, and it leaves through Firefox Sync — the same channel that carries your bookmarks — to the other devices signed into the same Firefox account. If Firefox Sync is off, nothing leaves the device.
 
-Sync is on by default, but it only starts transmitting once you have something to sync. When it does, it uploads a single snapshot containing your settings and UI preferences, your EQ presets, your Recent and Favorites lists — including the page URL and title of tracks you practised — and your per-track data (markers and labels, loop ranges, snippets, chord charts).
+Sync is on by default. When there is something to sync, it writes one compact snapshot into the browser's synced extension storage containing your settings and UI preferences, your EQ presets, your Recent and Favorites lists — including the page URL and title of tracks you practised — and your per-track data (markers and labels, loop ranges, snippets, chord charts).
 
 Because that snapshot contains the addresses of pages you have visited, this listing declares the `browsingActivity` data-collection category.
 
@@ -27,19 +27,15 @@ Not included: audio, page content, keystrokes, browsing history beyond the track
 
 **Where it goes**
 
-Snapshots are stored by a Cloudflare Worker with Cloudflare KV, at `https://note-by-note-sync.oapp.workers.dev`, operated by the author. The server source is in the repository and can be self-hosted — self-hosters change one URL (`src/features/sync/sync-hosts.ts`) and rebuild.
+Into Firefox Sync's storage under your Firefox account, end-to-end encrypted, subject to Mozilla's own data handling. The author operates no server and can see none of it. There are no accounts with us and no sync ID.
 
-- There are no accounts. A random 43-character sync ID is the only credential; it *is* the capability, so treat it like a password.
-- The ID travels in an `X-Sync-Id` header, never in the URL, so it does not land in request logs. KV is keyed by its SHA-256, so the raw ID is not stored either.
-- Snapshots are stored **unencrypted**. Whoever operates the server can read them. Run your own if that matters to you.
-- Snapshots expire after 180 days, refreshed on every write.
-- IP addresses are visible to Cloudflare as part of serving and rate-limiting requests, per Cloudflare's own data handling. They are not stored by the Worker or linked to a snapshot.
+Firefox caps this storage at 100 KB per extension. The snapshot is stored compact and compressed so a typical library fits with room to spare; when one doesn't, the oldest songs and chord charts stay on the device that has them and the Settings page says so.
 
 **Turning it off and deleting the data**
 
-- Settings → Sync turns sync off. No further data is transmitted.
-- Settings → Sync → Delete synced data removes the server-side copy.
-- Doing nothing also works: an unused snapshot expires after 180 days.
+- Settings → Sync turns sync off on that device. No further data is written.
+- Settings → Sync → Delete synced data empties the synced copy (other devices with sync still on will write theirs again).
+- Uninstalling the extension makes Firefox remove its synced storage.
 
 **Permissions and why**
 

@@ -45,3 +45,6 @@ public/worklets/pcm-tap-worklet.js
 # Generated at postinstall / build:before. See scripts/build-vocal-worklet.mjs.
 public/worklets/vocal-reducer-worklet.js
 export/
+
+# pnpm store created when a local store path is set
+.pnpm-store/

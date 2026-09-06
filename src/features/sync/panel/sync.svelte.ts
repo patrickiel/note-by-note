@@ -1,390 +1,199 @@
+import { encodeBackup, isEmptyBackup } from '../../../core/persist/backup-codec';
 import { createBackup, restoreBackup, type Backup } from '../../../core/persist/backup';
+import { session } from '../../../core/state/session.svelte';
+import type { MediaInfo } from '../../../core/model/types';
+import { fitBackup, type FitResult } from '../persist/fit';
+import { contentHash } from '../persist/hash';
+import { mergeBackups } from '../persist/merge';
+import {
+  BUDGET_CHARS,
+  itemsBytes,
+  packBackup,
+  packedChars,
+  SYNC_QUOTA_BYTES,
+  unpackBackup,
+} from '../persist/sync-blob';
+import {
+  clearSyncArea,
+  isRateLimited,
+  onSyncAreaChanged,
+  readSyncArea,
+  syncErrorMessage,
+  writeSyncArea,
+} from '../persist/sync-area';
 import {
   DEFAULT_SYNC_CONFIG,
-  generateSyncId,
-  loadSyncState,
-  SYNC_ID_RE,
+  loadSyncConfig,
   syncConfigItem,
-  syncIdItem,
   type SyncConfig,
 } from '../persist/sync-config';
-import { session } from '../../../core/state/session.svelte';
-import { deleteSnapshot, pullSnapshot, pushSnapshot, SyncHttpError } from './api';
-import {
-  hasIdCookieAccess,
-  readIdCookie,
-  removeIdCookie,
-  requestIdCookieAccess,
-  writeIdCookie,
-} from './id-cookie';
-import { snapshotHash } from './hash';
 
 /** Trailing debounce after the last data change before pushing. */
 const PUSH_DEBOUNCE_MS = 5000;
-/** How often to check the server for another device's changes. */
-const PULL_INTERVAL_MS = 5 * 60 * 1000;
+/** Writes are metered by the browser (120/min); keep ours far under that. */
+const MIN_PUSH_SPACING_MS = 30_000;
+/** Chunks arrive one by one; wait for the burst before reading. */
+const REMOTE_DEBOUNCE_MS = 1500;
+/** A torn read is usually a write still landing: look again shortly … */
+const TORN_RETRY_MS = 5000;
+/** … but not forever — past this, the writer died mid-write; our copy wins. */
+const TORN_GIVE_UP_MS = 90_000;
+const RATE_LIMIT_RETRY_MS = 65_000;
+/** A reconcile that finds everything in order takes milliseconds; without a
+ * floor "Syncing…" comes and goes inside a frame and the button reads dead. */
+const MIN_VISIBLE_SYNC_MS = 600;
+/** Belt and braces: the change event should carry everything, but a missed
+ * one must not mean a device stays stale until the next panel open. */
+const SAFETY_INTERVAL_MS = 5 * 60_000;
 
 /** Raw storage keys (no `local:` prefix in change events) that belong to the
- * backup snapshot. `syncConfig` itself is deliberately absent. */
-const SYNCED_KEY_RE = /^(settings|uiPrefs|history|favorites|eqPresets|track:)/;
+ * backup. `syncConfig` itself is deliberately absent. */
+const SYNCED_KEY_RE = /^(settings|uiPrefs|history|favorites|eqPresets|deletions|track:)/;
 
-function errorMessage(err: unknown): string {
-  if (err instanceof SyncHttpError) return err.message;
-  if (err instanceof TypeError) return 'Could not reach the sync server.';
-  return err instanceof Error ? err.message : 'Sync failed.';
-}
+const measure = (backup: Backup) => packedChars(encodeBackup(backup));
+const fit = (backup: Backup) => fitBackup(backup, BUDGET_CHARS, measure);
 
 /**
- * Device sync: mirrors the backup snapshot (see `persist/backup.ts`) to the
- * sync server under a secret ID, last-write-wins. Local changes are detected
- * via storage change events and pushed after a debounce; remote changes are
- * pulled at startup and on an interval, and applied via `restoreBackup` plus
- * a panel reload (stores read storage once at startup — same rationale as the
- * import flow in SettingsView).
+ * Cross-device sync through the browser's own synced storage — no server,
+ * no account, no ID: whoever signs into the same browser profile gets the
+ * data, because the browser vendor's sync carries it (see `sync-blob.ts` for
+ * the layout, `merge.ts` for how two copies become one).
  *
- * Runs only in the sidepanel: it is the sole writer of synced data, so there
- * is nothing to observe while it's closed. A change the panel didn't manage
- * to push before closing is remembered via `pendingPush`.
+ * One routine, `#reconcile`, does everything: read the area, compare with
+ * what this device last saw, merge, then write locally and/or remotely as
+ * needed. Local changes (storage events), remote ones (sync-area events),
+ * retries and the push debounce all just ask for a reconcile later — one
+ * timer, latest request wins — and the push spacing is enforced in `#push`.
+ * Applying a merge that changes local data ends in a panel reload — stores
+ * read storage once at start-up, same as the import flow — so that is
+ * deferred while a track is loaded and picked up on the next quiet moment,
+ * panel open, or "Sync now".
+ *
+ * Runs in every open panel document (there can be more than one: a Firefox
+ * window each, the local-player tab). They share `syncConfig` through its
+ * watch, so at worst two push the same content, which the spacing absorbs.
+ * A change the panel didn't manage to push before closing is remembered via
+ * `pendingPush`.
  */
 class SyncStore {
-  enabled = $state(false);
-  syncId = $state<string | null>(null);
-  lastSyncedAt = $state(0);
-  lastError = $state<string | null>(null);
-  /** An ID arrived from another device while this one already held data of its
-   * own. Applying would overwrite it, so the panel asks first — see
-   * `acceptRemote` / `keepLocal`. */
-  needsConsent = $state(false);
-  /** Whether the ID's durable copy can be kept — host access to the sync
-   * origin is held (see id-cookie.ts). Drives the Settings copy. */
-  durable = $state(false);
-  #syncing = $state(false);
+  config = $state<SyncConfig>({ ...DEFAULT_SYNC_CONFIG });
+  enabled = $derived(this.config.enabled);
+  lastSyncedAt = $derived(this.config.lastSyncedAt);
+  lastError = $derived(this.config.lastError);
+  /** The last push left old songs or charts out to fit the quota. */
+  trimmed = $derived(this.config.trimmed);
+  /** Bytes the area holds, by the browser's accounting. */
+  usedBytes = $state(0);
+  /** Another device's changes are in, waiting for a moment without a track
+   * loaded (applying reloads the panel). "Sync now" applies them at once. */
+  pendingApply = $state(false);
+  /** A depth, not a flag: "Sync now" holds it up for the minimum visible time
+   * around a reconcile that drops it as soon as it is done. */
+  #busy = $state(0);
 
   status = $derived<'off' | 'syncing' | 'error' | 'idle'>(
-    !this.enabled ? 'off' : this.#syncing ? 'syncing' : this.lastError ? 'error' : 'idle',
+    !this.enabled ? 'off' : this.#busy > 0 ? 'syncing' : this.lastError ? 'error' : 'idle',
+  );
+  usedPercent = $derived(
+    this.usedBytes ? Math.max(1, Math.round((this.usedBytes / SYNC_QUOTA_BYTES) * 100)) : 0,
   );
 
-  #config: SyncConfig = { ...DEFAULT_SYNC_CONFIG };
-  /** Mirrors `syncIdItem` — the ID lives in browser-synced storage (see
-   * `persist/sync-config.ts`), separate from the per-device bookkeeping. */
-  #id: string | null = null;
-  /** The ID last handed to `writeIdCookie` by this document, so `#reflect`
-   * writes the cookie once per identity rather than on every state change. */
-  #cookieId: string | null = null;
-  /** Suppresses the echo of our own `syncConfigItem` write. The ID watcher
-   * needs no such flag: its own echo carries `value === #id` and is skipped by
-   * value, so a real event from another device is never dropped. */
-  #writing = false;
-  /** Suppresses change events while `restoreBackup` writes a remote snapshot,
-   * so applying can't schedule a push of what was just pulled. */
+  /** Suppresses local change events while a merge is being written. */
   #applying = false;
-  #pushTimer: ReturnType<typeof setTimeout> | undefined;
-  /** Serializes pushes and reconciles so they can't interleave. */
+  #timer: ReturnType<typeof setTimeout> | undefined;
+  #lastPushAt = 0;
+  #tornSince = 0;
+  /** Serializes reconciles so they can't interleave. */
   #queue: Promise<unknown> = Promise.resolve();
 
   async init() {
-    const [{ config, syncId }, kept, durable] = await Promise.all([
-      loadSyncState(),
-      readIdCookie(),
-      hasIdCookieAccess(),
-    ]);
-    this.durable = durable;
-    this.#config = config;
-    this.#id = syncId;
-    this.#reflect();
-    // Watchers go up before any write below, so nothing arriving from another
-    // device in the meantime is missed.
+    this.config = await loadSyncConfig();
+    // Another panel document's bookkeeping, and the echo of our own writes
+    // (which is the value already held — harmless).
     syncConfigItem.watch((value) => {
-      if (this.#writing) return;
-      this.#config = value ?? { ...DEFAULT_SYNC_CONFIG };
-      this.#reflect();
+      this.config = value ?? { ...DEFAULT_SYNC_CONFIG };
     });
-    // The ID is browser-synced: another device on this browser profile can
-    // hand this one an ID (or replace it) at any time.
-    syncIdItem.watch((value) => {
-      if (value === this.#id) return;
-      if (value === null && this.#id) {
-        // The key was deleted, not replaced — the sync area was purged (an
-        // uninstall on another device, a sync reset). Another device changing
-        // identity on purpose always arrives as a different string. Put our ID
-        // back rather than drift into minting a new one over the same data.
-        // Consent is not a factor: it gates applying remote data (see
-        // `#startReconcile`), not holding an identity.
-        void this.#writeId(this.#id);
-        return;
-      }
-      this.#id = value;
-      this.#reflect();
-      if (!this.#config.enabled) return;
-      // Identity changed while enabled: the bookkeeping refers to the old
-      // blob — reset it and reconcile against the new one.
-      void this.#saveConfig({ lastSyncedAt: 0, lastSyncedHash: null, pendingPush: false }).then(
-        () => this.#startReconcile({ allowApply: session.media === null }),
-      );
-    });
-    // Connect's `<all_urls>` grant (and Revoke Permissions) changes cookie
-    // access without going through this store.
-    browser.permissions.onAdded.addListener(() => void this.#refreshDurable());
-    browser.permissions.onRemoved.addListener(() => void this.#refreshDurable());
-
-    // Best-effort like every other sync-area write: a failure here must not
-    // keep the listeners below from being installed.
-    await this.#recoverId(kept).catch(() => {});
-
     browser.storage.local.onChanged.addListener((changes) => {
-      if (this.#applying) return;
-      if (!this.#config.enabled) return;
+      if (this.#applying || !this.config.enabled) return;
       if (!Object.keys(changes).some((key) => SYNCED_KEY_RE.test(key))) return;
-      this.#onDataChanged();
+      // Persisted immediately (not on the debounce) so a panel closed
+      // mid-burst still knows there is unpushed data next time it opens.
+      void this.#saveConfig({ pendingPush: true, lastChangedAt: Date.now() });
+      this.#reconcileIn(PUSH_DEBOUNCE_MS);
     });
-
-    if (this.#config.enabled && this.#id) {
-      await this.#startReconcile({ allowApply: true });
-    }
-
-    // A track being loaded defers remote applies (the reload would interrupt
-    // practice) to the next panel open or a manual "Sync now".
+    onSyncAreaChanged(() => {
+      if (this.config.enabled) this.#reconcileIn(REMOTE_DEBOUNCE_MS);
+    });
+    if (this.config.enabled) await this.#enqueue(() => this.#reconcile(true));
     setInterval(() => {
-      if (!this.#config.enabled || !this.#id) return;
-      void this.#startReconcile({ allowApply: session.media === null });
-    }, PULL_INTERVAL_MS);
+      if (this.config.enabled) void this.#enqueue(() => this.#reconcile());
+    }, SAFETY_INTERVAL_MS);
   }
 
-  /**
-   * Reconcile, but never silently overwrite data this device already has.
-   *
-   * Sync ships on, and the ID rides browser-profile sync, so a device can be
-   * handed an identity it never asked for. When that device is empty (a fresh
-   * install — the case this default exists for) adopting is what the user
-   * wants and there is nothing to lose, so consent is implied. When it already
-   * holds a library, applying the remote would delete it: raise `needsConsent`
-   * and let the panel ask instead.
-   */
-  async #startReconcile(opts: { allowApply: boolean }) {
-    const id = this.#id;
-    if (!this.#config.enabled || !id) return;
-    if (this.#config.consentedId !== id) {
-      if (!(await this.#isPristine())) {
-        this.needsConsent = true;
-        return;
-      }
-      await this.#saveConfig({ consentedId: id });
-    }
-    await this.#enqueue(() => this.#reconcile(opts));
-  }
-
-  /** Nothing here a remote snapshot could destroy. Settings and UI prefs are
-   * excluded deliberately — they are a keystroke to redo, and weighing them
-   * would make the common "installed, opened it once" path prompt for nothing. */
-  async #isPristine(): Promise<boolean> {
-    const local = await createBackup();
-    return (
-      local.history.length === 0 &&
-      local.favorites.length === 0 &&
-      local.tracks.length === 0 &&
-      local.eqPresets.length === 0
-    );
-  }
-
-  /** User chose the synced copy: apply it over this device's data. */
-  async acceptRemote(): Promise<void> {
-    const id = this.#id;
-    if (!id) return;
-    this.needsConsent = false;
-    await this.#saveConfig({ consentedId: id });
-    await this.#enqueue(() => this.#reconcile({ allowApply: true }));
-  }
-
-  /** User chose this device's data: keep it and let it win the next push. */
-  async keepLocal(): Promise<void> {
-    const id = this.#id;
-    if (!id) return;
-    this.needsConsent = false;
-    await this.#saveConfig({ consentedId: id, lastChangedAt: Date.now(), pendingPush: true });
-    await this.#enqueue(() => this.#push({ force: true }));
-  }
-
-  /** Turns sync on. With no ID anywhere — none kept from an earlier enable,
-   * none received from another device via browser sync — generates one and
-   * uploads this device's data; otherwise reuses the ID and reconciles. */
   async enable(): Promise<void> {
-    // In a gesture, so the durable copy can be authorised in the same breath.
-    await this.#ensureDurable();
-    const fresh = this.#id === null;
-    const id = this.#id ?? generateSyncId();
-    await this.#saveId(id);
-    // Turning it on by hand is the consent.
-    await this.#saveConfig({ enabled: true, consentedId: id, lastError: null });
-    this.needsConsent = false;
-    await this.#enqueue(() =>
-      fresh ? this.#push({ force: true }) : this.#reconcile({ allowApply: true }),
-    );
+    await this.#saveConfig({ enabled: true, lastError: null });
+    await this.#enqueue(() => this.#reconcile(true));
   }
 
-  /** Keeps the ID so re-enabling picks the same remote blob back up. */
   async disable(): Promise<void> {
-    clearTimeout(this.#pushTimer);
-    this.needsConsent = false;
+    clearTimeout(this.#timer);
+    this.pendingApply = false;
     await this.#saveConfig({ enabled: false });
   }
 
-  /**
-   * Removes this ID's snapshot from the server. Sync is switched off too —
-   * leaving it on would re-upload from the next change and quietly undo the
-   * deletion. The ID is kept, so turning sync back on starts a fresh blob; its
-   * durable copy is not, so a reinstall does not quietly bring it back.
-   */
-  async deleteRemote(): Promise<void> {
-    const id = this.#id;
-    if (!id) return;
-    clearTimeout(this.#pushTimer);
-    this.needsConsent = false;
-    await this.#enqueue(async () => {
-      this.#syncing = true;
-      try {
-        await deleteSnapshot(id);
-        await this.#saveConfig({
-          enabled: false,
-          lastSyncedAt: 0,
-          lastSyncedHash: null,
-          pendingPush: false,
-          lastError: null,
-        });
-        this.#cookieId = null;
-        await removeIdCookie();
-      } catch (err) {
-        await this.#saveConfig({ lastError: errorMessage(err) });
-        throw err;
-      } finally {
-        this.#syncing = false;
-      }
-    });
-  }
-
-  /**
-   * Links this device to an existing sync ID. Pull-first: existing remote data
-   * replaces this device's (the UI confirms beforehand; ends in a reload) and
-   * never the other way around — a fresh install must not clobber the remote.
-   * Returns 'uploaded' when the ID had no data yet and local data seeded it.
-   */
-  async connectWithId(rawId: string): Promise<'applied' | 'uploaded'> {
-    const id = rawId.trim();
-    if (!SYNC_ID_RE.test(id)) throw new Error("That doesn't look like a sync ID.");
-    await this.#ensureDurable();
-    await this.#saveId(id);
-    // Typing in someone else's ID, past the UI's confirm, is the consent.
-    await this.#saveConfig({
-      enabled: true,
-      consentedId: id,
-      lastSyncedAt: 0,
-      lastSyncedHash: null,
-      pendingPush: false,
-      lastError: null,
-    });
-    this.needsConsent = false;
-    return this.#enqueue(async () => {
-      try {
-        const remote = await pullSnapshot(id);
-        if (remote) {
-          await this.#applyRemote(remote);
-          return 'applied' as const;
-        }
-        await this.#push({ force: true });
-        return 'uploaded' as const;
-      } catch (err) {
-        await this.#saveConfig({ lastError: errorMessage(err) });
-        throw err;
-      }
-    });
-  }
-
+  /** Back up now and pull in the other devices' changes, reload included.
+   * Usually there is nothing to carry — the panel reconciled when it opened
+   * and after every change since — so what the click has to show for itself
+   * is the status line: "Syncing…" for long enough to read, then a refreshed
+   * "Last synced just now". */
   async syncNow(): Promise<void> {
-    await this.#startReconcile({ allowApply: true });
-  }
-
-  /** Settings → "Keep after reinstall". Must run in a user gesture. */
-  async keepAfterReinstall(): Promise<boolean> {
-    return this.#ensureDurable();
-  }
-
-  /** Asks for cookie access if it isn't held yet; a refusal is not an error —
-   * sync works without the durable copy, the panel just says so. */
-  async #ensureDurable(): Promise<boolean> {
-    if (!this.durable) this.durable = await requestIdCookieAccess();
-    if (this.durable) await this.#onDurable();
-    return this.durable;
-  }
-
-  async #refreshDurable() {
-    const durable = await hasIdCookieAccess();
-    if (durable === this.durable) return;
-    this.durable = durable;
-    if (durable) await this.#onDurable();
-  }
-
-  /** Access just became available. On a reinstall it usually arrives after
-   * `init` (Connect is the first thing pressed), so the cookie could not be
-   * read then — look again before an ID is minted over it; otherwise write
-   * (or refresh) the copy now that it is allowed. */
-  async #onDurable() {
-    if (this.#id === null) await this.#recoverId(await readIdCookie());
-    this.#cookieId = null;
-    this.#reflect();
-  }
-
-  /** No ID in the sync area: a fresh install, or a reinstall — the browser
-   * purged the extension's synced storage on uninstall. The cookie is this
-   * profile's own earlier ID, so taking it back is what the user expects and
-   * needs no consent; the next reconcile pulls the data. */
-  async #recoverId(kept: string | null) {
-    if (this.#id === null && kept) await this.#adoptId(kept);
-  }
-
-  #reflect() {
-    this.enabled = this.#config.enabled;
-    this.syncId = this.#id;
-    this.lastSyncedAt = this.#config.lastSyncedAt;
-    this.lastError = this.#config.lastError;
-    if (!this.#config.enabled || this.#config.consentedId === this.#id) this.needsConsent = false;
-    // The one place the durable copy is written: whenever sync is on with an
-    // ID — received, minted, connected or restored — once per identity per
-    // document (which also keeps its expiry rolling).
-    const keep = this.#config.enabled ? this.#id : null;
-    if (keep && keep !== this.#cookieId) {
-      this.#cookieId = keep;
-      void writeIdCookie(keep);
+    this.#busy++;
+    try {
+      await Promise.all([
+        this.#enqueue(() => this.#reconcile(true)),
+        new Promise((resolve) => setTimeout(resolve, MIN_VISIBLE_SYNC_MS)),
+      ]);
+    } finally {
+      this.#busy--;
     }
   }
 
-  /** An ID this device originated or recovered is its own — consent implied. */
-  async #adoptId(id: string) {
-    await this.#saveId(id);
-    await this.#saveConfig({ consentedId: id });
+  /** The loaded track changed (wired to `session.onMediaChanged` by the panel
+   * root). A merge held back because applying it would reload the panel
+   * mid-practice has no other cue that its moment has come: without this it
+   * waits for the safety interval, up to five minutes after the track went
+   * away, while this device carries on pushing its own state. */
+  onMedia(media: MediaInfo | null): void {
+    if (media === null && this.pendingApply && this.config.enabled) {
+      this.#reconcileIn(REMOTE_DEBOUNCE_MS);
+    }
   }
 
-  /** Sync-area writes are quota-limited (~120/min), so no-ops are skipped. */
-  async #saveId(id: string | null) {
-    if (id === this.#id) return;
-    this.#id = id;
-    this.#reflect();
-    await this.#writeId(id);
-  }
-
-  /** Writes the sync area only — `#id` is already what it should be, and the
-   * cookie follows from `#reflect`. */
-  async #writeId(id: string | null) {
-    await syncIdItem.setValue(id);
+  /**
+   * Empties the synced copy and turns sync off — left on, the next change
+   * would quietly re-upload. Other devices with sync on will re-seed it from
+   * their own data the next time they change something.
+   */
+  async deleteRemote(): Promise<void> {
+    await this.disable();
+    await this.#enqueue(async () => {
+      this.#busy++;
+      try {
+        await clearSyncArea();
+        this.usedBytes = 0;
+        await this.#saveConfig({ ...DEFAULT_SYNC_CONFIG, enabled: false });
+      } catch (err) {
+        await this.#saveConfig({ lastError: syncErrorMessage(err) });
+        throw err;
+      } finally {
+        this.#busy--;
+      }
+    });
   }
 
   async #saveConfig(patch: Partial<SyncConfig>) {
-    this.#config = { ...this.#config, ...patch };
-    this.#reflect();
-    this.#writing = true;
-    try {
-      await syncConfigItem.setValue(this.#config);
-    } finally {
-      this.#writing = false;
-    }
+    this.config = { ...this.config, ...patch };
+    await syncConfigItem.setValue($state.snapshot(this.config));
   }
 
   #enqueue<T>(op: () => Promise<T>): Promise<T> {
@@ -393,143 +202,178 @@ class SyncStore {
     return result;
   }
 
-  #onDataChanged() {
-    // Persisted immediately (not on the debounce) so a panel closed mid-burst
-    // still knows there is unpushed data next time it opens.
-    void this.#saveConfig({ pendingPush: true, lastChangedAt: Date.now() });
-    clearTimeout(this.#pushTimer);
-    this.#pushTimer = setTimeout(() => {
-      void this.#enqueue(() => this.#push());
-    }, PUSH_DEBOUNCE_MS);
+  /** Reconcile after `delayMs`; a later request replaces an earlier one. */
+  #reconcileIn(delayMs: number) {
+    clearTimeout(this.#timer);
+    this.#timer = setTimeout(() => void this.#enqueue(() => this.#reconcile()), delayMs);
   }
 
-  /** Uploads the current snapshot. The hash guard makes echoes (and no-op
-   * writes) free; `force` skips it for seeding an empty remote. */
-  async #push(opts: { force?: boolean } = {}) {
-    if (!this.#config.enabled) return;
-    // Sync ships on, but an ID is minted only once there is something to push.
-    // Deferring leaves room for a profile-synced ID from another device to
-    // arrive first, and avoids seeding a blob for an install nobody uses.
-    // Minting our own means this device started the data set — consent implied.
-    if (!this.#id) {
-      await this.#adoptId(generateSyncId());
-      opts = { force: true };
-    }
-    const id = this.#id;
-    if (!id) return;
-    this.#syncing = true;
+  /** Whether a write would come too soon after the last one, scheduling the
+   * retry if so. Asked before the encoding work wherever a push is the only
+   * thing left to do: the debounce is 5 s and the spacing 30 s, so most of a
+   * burst's reconciles have nothing to do but come back later, and gzipping
+   * the whole library to find that out is pure waste on the panel's thread. */
+  #pushTooSoon(): boolean {
+    const wait = this.#lastPushAt + MIN_PUSH_SPACING_MS - Date.now();
+    if (wait <= 0) return false;
+    this.#reconcileIn(wait);
+    return true;
+  }
+
+  /**
+   * The whole algorithm. Reads the area and this device's data, then:
+   *  - nothing there → seed it (unless this device has nothing either);
+   *  - torn → wait for the rest to land, retry;
+   *  - unchanged since last look → push if this device changed something;
+   *  - otherwise merge the two copies, write the result wherever it differs.
+   *
+   * Applying (writing a merge locally) reloads the panel, so it waits for a
+   * moment without a track loaded unless `force` — "Sync now", enabling,
+   * opening the panel.
+   */
+  async #reconcile(force = false) {
+    if (!this.config.enabled) return;
+    this.#busy++;
+    let applied = false;
     try {
+      const { result, bytes } = await readSyncArea();
+      this.usedBytes = bytes;
+
+      if (result.kind === 'torn') {
+        if (!this.#tornSince) this.#tornSince = Date.now();
+        if (Date.now() - this.#tornSince < TORN_GIVE_UP_MS) {
+          this.#reconcileIn(TORN_RETRY_MS);
+          return;
+        }
+        // Nobody finished that write; ours replaces it. Whatever it carried
+        // comes back merged when its writer reconciles against ours.
+      }
+      this.#tornSince = 0;
+
+      // When there is nothing new from another device, a push is the only
+      // thing this reconcile could do — and if the spacing says not yet, it
+      // need not read and encode the whole library to find that out. The
+      // debounce is 5 s against a 30 s spacing, so during a burst of edits
+      // that is most reconciles.
+      const pushIsAllThatIsLeft =
+        result.kind === 'torn' ||
+        (this.config.pendingPush &&
+          (result.kind === 'none' || result.meta.h === this.config.lastRemoteHash));
+      if (pushIsAllThatIsLeft && this.#pushTooSoon()) return;
+
       const local = await createBackup();
-      const hash = await snapshotHash(local);
-      if (!opts.force && hash === this.#config.lastSyncedHash) {
-        if (this.#config.pendingPush || this.#config.lastError) {
-          await this.#saveConfig({ pendingPush: false, lastError: null });
+      const localHash = await contentHash(local);
+      const localChanged = localHash !== this.config.lastLocalHash;
+
+      if (result.kind === 'torn') {
+        if (!this.#pushTooSoon()) await this.#push(await fit(local), localHash);
+        return;
+      }
+
+      if (result.kind === 'none') {
+        if (isEmptyBackup(local) && !this.config.pendingPush) return;
+        if (!this.#pushTooSoon()) await this.#push(await fit(local), localHash);
+        return;
+      }
+
+      const { meta, base64 } = result;
+      if (meta.h === this.config.lastRemoteHash) {
+        // Remote is what we last saw (our own echo included).
+        if (localChanged || this.config.pendingPush) {
+          if (!this.#pushTooSoon()) await this.#push(await fit(local), localHash);
+        } else {
+          // Nothing to send and nothing to fetch: this device is in agreement
+          // with the synced copy as of now, which is what the status line
+          // reports. Recording it is the only visible outcome a "Sync now"
+          // that finds everything already in order can have.
+          await this.#saveConfig({ lastSyncedAt: Date.now(), lastError: null });
         }
         return;
       }
-      await pushSnapshot(id, local);
-      await this.#saveConfig({
-        lastSyncedAt: local.exportedAt,
-        lastSyncedHash: hash,
-        pendingPush: false,
-        lastError: null,
-      });
-    } catch (err) {
-      // pendingPush stays set — retried on the next change, interval tick,
-      // startup, or manual sync. No retry timer.
-      await this.#saveConfig({ lastError: errorMessage(err) });
-    } finally {
-      this.#syncing = false;
-    }
-  }
 
-  /** Pull-and-decide: push, apply remote, or nothing — last write wins. */
-  async #reconcile(opts: { allowApply: boolean }) {
-    const id = this.#id;
-    if (!this.#config.enabled || !id) return;
-    this.#syncing = true;
-    try {
-      const remote = await pullSnapshot(id);
-      const local = await createBackup();
-      const localHash = await snapshotHash(local);
-      const localChanged = localHash !== this.#config.lastSyncedHash;
+      // Another device wrote since we last looked.
+      const remote = await unpackBackup(base64);
+      const remoteWins = !localChanged || remote.exportedAt > this.config.lastChangedAt;
+      const merged = mergeBackups(local, remote, remoteWins);
+      const mergedHash = await contentHash(merged);
+      const needApply = mergedHash !== localHash;
 
-      if (remote === null) {
-        // First device on this ID, or the blob expired server-side: seed it.
-        await this.#uploadLocal(local, localHash);
+      if (needApply && !force && session.media !== null) {
+        // A track is loaded; applying would reload the panel mid-practice.
+        // Nothing is pushed either: a push now would carry only our side.
+        // Before the fit, so a track left loaded for an hour doesn't gzip the
+        // library on every tick to throw the result away.
+        this.pendingApply = true;
         return;
       }
-      if (remote.exportedAt === this.#config.lastSyncedAt) {
-        // Remote is still what we last synced; push if we have news.
-        if (localChanged || this.#config.pendingPush) await this.#uploadLocal(local, localHash);
-        else if (this.#config.lastError) await this.#saveConfig({ lastError: null });
-        return;
+      this.pendingApply = false;
+
+      const fitted = await fit(merged);
+      // Push our own edits, or a full copy the remote lacks. Once the merge
+      // is over the quota only our edits count: two devices holding
+      // different old songs would otherwise cut the copy differently and
+      // re-upload each other's cut forever. The remote's own hash is the
+      // last thing asked for — another full encode, and only the last term
+      // needs it.
+      const needPush =
+        localChanged ||
+        this.config.pendingPush ||
+        (!fitted.trimmed && mergedHash !== (await contentHash(remote)));
+
+      if (needApply) {
+        // #applying stays set until the reload: nothing in between may
+        // schedule a push of what was just written. The reload is owed from
+        // here on, even if the restore fails halfway.
+        this.#applying = true;
+        clearTimeout(this.#timer);
+        applied = true;
+        await restoreBackup(merged);
       }
-      // Another device pushed since our last sync.
-      if ((await snapshotHash(remote)) === localHash) {
-        // Same content, different timestamp — adopt its bookkeeping, skip the reload.
+      if (needPush) {
+        await this.#push(fitted, mergedHash);
+      } else {
         await this.#saveConfig({
-          lastSyncedAt: remote.exportedAt,
-          lastSyncedHash: localHash,
+          lastSyncedAt: Date.now(),
+          lastRemoteHash: meta.h,
+          lastLocalHash: mergedHash,
           pendingPush: false,
           lastError: null,
+          trimmed: fitted.trimmed,
         });
-        return;
-      }
-      if (!localChanged || remote.exportedAt > this.#config.lastChangedAt) {
-        if (opts.allowApply) await this.#applyRemote(remote);
-        // else: deferred — don't push over a newer remote either.
-      } else {
-        await this.#uploadLocal(local, localHash);
       }
     } catch (err) {
-      await this.#saveConfig({ lastError: errorMessage(err) });
+      await this.#saveConfig({ lastError: syncErrorMessage(err) });
+      if (isRateLimited(err)) this.#reconcileIn(RATE_LIMIT_RETRY_MS);
     } finally {
-      this.#syncing = false;
+      this.#busy--;
+      // Local data changed under the stores (same situation as an import).
+      if (applied) location.reload();
     }
   }
 
-  async #uploadLocal(local: Backup, hash: string) {
-    const id = this.#id;
-    if (!id) return;
-    await pushSnapshot(id, local);
+  /** Writes a fitted backup to the area — or, too soon after the last write,
+   * comes back for it later (the next reconcile reaches the same conclusion;
+   * `pendingPush` and the hashes are untouched until the write lands).
+   * `hash` is the content hash of this device's full data, so a trimmed push
+   * doesn't read as "local changed" next time. */
+  async #push(fitted: FitResult, hash: string) {
+    if (this.#pushTooSoon()) return;
+    const exportedAt = Date.now();
+    const packed = await packBackup(
+      encodeBackup({ ...fitted.backup, exportedAt }),
+      browser.runtime.getManifest().version,
+    );
+    await writeSyncArea(packed.items);
+    this.#lastPushAt = Date.now();
+    this.usedBytes = itemsBytes(packed.items);
     await this.#saveConfig({
-      lastSyncedAt: local.exportedAt,
-      lastSyncedHash: hash,
+      lastSyncedAt: exportedAt,
+      lastRemoteHash: packed.meta.h,
+      lastLocalHash: hash,
       pendingPush: false,
       lastError: null,
+      trimmed: fitted.trimmed,
     });
-  }
-
-  /** Overwrites local data with the remote snapshot and reloads the panel
-   * (mirrors the import flow — stores read storage once at startup). The hash
-   * is taken from a re-read because `parseBackup` backfills defaults, so what
-   * landed in storage can differ from the remote bytes. */
-  async #applyRemoteImpl(remote: Backup) {
-    await restoreBackup(remote);
-    const applied = await createBackup();
-    await this.#saveConfig({
-      lastSyncedAt: remote.exportedAt,
-      lastSyncedHash: await snapshotHash(applied),
-      pendingPush: false,
-      lastError: null,
-    });
-    // After the reload, reconcile sees remote.exportedAt === lastSyncedAt and
-    // an unchanged hash — no loop.
-    location.reload();
-  }
-
-  async #applyRemote(remote: Backup) {
-    // #applying stays set: the page is about to reload, and nothing that
-    // happens between restore and reload should schedule a push.
-    this.#applying = true;
-    clearTimeout(this.#pushTimer);
-    try {
-      await this.#applyRemoteImpl(remote);
-    } catch (err) {
-      this.#applying = false;
-      throw err;
-    }
   }
 }
 

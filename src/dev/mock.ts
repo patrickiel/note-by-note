@@ -13,12 +13,12 @@ const GUITAR_EQ = BUILTIN_EQ_PRESETS.find((p) => p.name === 'Guitar')!;
  * The store screenshots are taken from this state. */
 export function installMockState() {
   session.connection = 'connected-direct';
-  session.media = {
+  session.setMedia({
     title: 'Megadeth - Symphony of Destruction - Guitar Tab | Lesson',
     pageUrl: 'https://youtube.com/watch?v=741FSo7Xb40',
     duration: 230,
     hasVideo: true,
-  };
+  });
   session.t = 141;
   session.playing = false;
 

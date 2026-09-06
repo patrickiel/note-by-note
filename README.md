@@ -50,8 +50,8 @@ draws a chart under the timeline.
 **Keeping your place.** Settings are stored per track against a normalized URL,
 so reopening a video brings back its pitch, speed, markers, loops and snippets —
 however you open it, not just from the library. Favorites and
-recents live in a library tab, and optional cross-device sync pushes a snapshot
-to a small Cloudflare Worker.
+recents live in a library tab, and optional cross-device sync carries it all
+to your other browsers through the browser's own sync — no server, no account.
 
 ## Installing it
 
@@ -116,8 +116,9 @@ the engine.
 
 ## Tests
 
-`pnpm test:dsp` runs the DSP unit tests under `node --test`: the center-cut
-math, the CQT, chord decoding. Fast, no browser.
+`pnpm test:dsp` runs the unit tests under `node --test`: the center-cut
+math, the CQT, chord decoding, the compact backup codec and the sync
+fit-to-budget logic. Fast, no browser.
 
 The e2e harness is the interesting one. It launches Chrome for Testing with the
 extension installed, plays a 440 Hz tone, and asserts on the *processed output* —
@@ -166,36 +167,30 @@ the other way round.
   are in marker chips, loop/sequence bounds, the tab-capture CTA and the
   vocal-reducer control — known and pre-existing.
 
-## Sync server
+## Sync
 
-`server/` is a separate pnpm workspace (its own lockfile and tsconfig): a
-Cloudflare Worker plus KV storing one backup snapshot per sync ID, last write
-wins. There are no accounts. The 43-character sync ID *is* the credential, so
-treat it like a password. Deploy notes in [server/README.md](server/README.md).
+There is no server. Cross-device sync writes a compact, gzipped copy of your
+data into the browser's synced extension storage (`browser.storage.sync`), and
+the browser vendor's sync — Chrome sync, Firefox Sync — carries it to the other
+devices signed into the same profile. No account with us, no ID to paste, no
+network request of the extension's own; nothing in the extension talks to the
+network at all, and there is no telemetry.
 
-The ID travels in an `X-Sync-Id` header rather than the URL, because URLs are
-recorded verbatim by request logs, and KV is keyed by its SHA-256 so the raw
-token isn't stored either. Writes are rate-limited per IP and snapshots carry a
-180-day TTL, refreshed on every write.
+A copy is your settings, UI preferences, EQ presets, Recent and Favorites (page
+URL, title, duration) and per-track data (markers with your labels, loop
+ranges, snippets, chord charts). **No audio, ever.** It is stored in the
+compact backup format ([backup-codec.ts](src/core/persist/backup-codec.ts) —
+the same file `Settings → Export` writes), which is ~9× smaller than the raw
+data, so even a few hundred songs with chord charts fit the browser's 100 KB
+quota; if a library still doesn't, the oldest songs, then the oldest chord
+charts, stay on the device that has them ([fit.ts](src/features/sync/persist/fit.ts)).
 
-A snapshot is your settings, UI preferences, EQ presets, Recent and Favorites
-(page URL, title, duration, thumbnail URL) and per-track data (markers with your
-labels, loop ranges, snippets, chord charts). **No audio, ever.** It is stored
-unencrypted, so whoever operates the Worker can read it — run your own if that
-matters to you. Sync is on by default but only mints an ID once you have
-something to sync; `Settings → Sync → Delete synced data` removes the server
-copy. Nothing else in the extension talks to the network: there is no telemetry
-and no analytics.
-
-The ID lives in the browser's synced extension storage, so a second device on
-the same profile picks it up by itself. The browser wipes that storage (on
-every device) when the extension is uninstalled, so the ID can also be kept as
-a cookie on the sync server's domain, which outlives the extension — that is
-what the `cookies` permission and the optional access to that one domain are
-for (`Settings → Sync → Keep the ID after a reinstall`; the **Connect** grant
-covers it too). How and why, and what it does not survive, is documented in
-[id-cookie.ts](src/features/sync/panel/id-cookie.ts). Self-hosters change the
-URL in [sync-hosts.ts](src/features/sync/sync-hosts.ts) and rebuild.
+Two devices' copies are merged rather than overwritten
+([merge.ts](src/features/sync/persist/merge.ts)): the more recently edited
+version of each song wins, and a song you removed on one device stays removed
+(deletions are dated, [deletions.ts](src/core/persist/deletions.ts)). Sync is
+on by default; `Settings → Sync` turns it off, and `Delete synced data` empties
+the synced copy.
 
 ## License
 
