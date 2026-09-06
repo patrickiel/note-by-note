@@ -118,7 +118,7 @@ export type CompactSong = [string, string, number] | [string, string, number, st
 export interface CompactEntry {
   /** Index into `songs`. */
   i: number;
-  /** updatedAt, seconds. */
+  /** updatedAt, ms. */
   at: number;
   p?: CompactParams;
   /** pageUrl, when not the song's plain page. */
@@ -128,13 +128,13 @@ export interface CompactEntry {
 }
 
 export interface CompactFavorite extends CompactEntry {
-  /** favoritedAt, seconds. */
+  /** favoritedAt, ms. */
   fa: number;
-  /** lastAccessedAt, seconds. */
+  /** lastAccessedAt, ms. */
   la: number;
 }
 
-/** `[name, gains, updatedAt_s?]`. */
+/** `[name, gains, updatedAt?]`. */
 export type CompactEqPreset = [string, number[]] | [string, number[], number];
 
 /** `[t_ms, label?]` — label omitted when empty. */
@@ -167,13 +167,13 @@ export interface CompactChart {
   cov: number;
   a0: number;
   a1: number;
-  /** computedAt, seconds. */
+  /** computedAt, ms. */
   c: number;
 }
 
 export interface CompactTrack {
   i: number;
-  /** updatedAt, seconds. */
+  /** updatedAt, ms. */
   at: number;
   m?: CompactMarker[];
   s?: CompactSnippet[];
@@ -189,19 +189,19 @@ export interface CompactTrack {
 export interface CompactBackup {
   format: typeof BACKUP_FORMAT;
   version: typeof COMPACT_VERSION;
-  /** exportedAt, seconds. */
+  /** exportedAt, ms. */
   at: number;
   /** Settings that differ from the defaults (`lastUsedParams` as `lp`). */
   s: Record<string, unknown>;
   /** UI prefs that differ from the defaults. */
   u: Record<string, unknown>;
-  /** `[name, gains, updatedAt_s?]` per saved EQ preset. */
+  /** `[name, gains, updatedAt?]` per saved EQ preset. */
   eq: CompactEqPreset[];
   songs: CompactSong[];
   h: CompactEntry[];
   f: CompactFavorite[];
   t: CompactTrack[];
-  /** Deletion records, dates in seconds; omitted when there are none. */
+  /** Deletion records (ms); omitted when there are none. */
   del?: Record<string, number>;
 }
 
@@ -224,7 +224,10 @@ const round2 = roundTo(2);
 const round3 = roundTo(3);
 const millis = (seconds: number) => Math.round(seconds * 1000);
 const centis = (seconds: number) => Math.round(seconds * 100);
-const secs = (ms: number) => Math.round((Number.isFinite(ms) ? ms : 0) / 1000);
+/** Timestamps stay in milliseconds: they decide merges (a deletion against a
+ * re-add, the newer of two edits), and rounding would let two actions within
+ * the same second read as one. */
+const stamp = (ms: number) => (Number.isFinite(ms) ? Math.round(ms) : 0);
 
 function num(value: unknown, section: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) throw damaged(section);
@@ -482,7 +485,7 @@ function songAt(songs: TrackIdentity[], index: unknown, section: string): TrackI
 // Recent / Favorites
 
 function encodeEntry(entry: HistoryEntry, songs: SongTable): CompactEntry {
-  const out: CompactEntry = { i: songs.add(entry.identity), at: secs(entry.updatedAt) };
+  const out: CompactEntry = { i: songs.add(entry.identity), at: stamp(entry.updatedAt) };
   const params = encodeParams(entry.params ?? DEFAULT_PARAMS);
   if (params) out.p = params;
   const pageUrl = entry.pageUrl ?? '';
@@ -496,7 +499,7 @@ function encodeEntry(entry: HistoryEntry, songs: SongTable): CompactEntry {
 function decodeEntry(raw: unknown, songs: TrackIdentity[], section: string): HistoryEntry {
   const c = rec(raw, section);
   const identity = songAt(songs, c.i, section);
-  const updatedAt = num(c.at, section) * 1000;
+  const updatedAt = num(c.at, section);
   const pageUrl = c.url === undefined ? defaultPageUrl(identity.normalizedUrl) : str(c.url, section);
   const thumbnailUrl = c.th === undefined ? youtubeThumbnailUrl(pageUrl) : str(c.th, section);
   const entry: HistoryEntry = {
@@ -513,8 +516,8 @@ function decodeEntry(raw: unknown, songs: TrackIdentity[], section: string): His
 function encodeFavorite(entry: FavoriteEntry, songs: SongTable): CompactFavorite {
   return {
     ...encodeEntry(entry, songs),
-    fa: secs(entry.favoritedAt),
-    la: secs(entry.lastAccessedAt),
+    fa: stamp(entry.favoritedAt),
+    la: stamp(entry.lastAccessedAt),
   };
 }
 
@@ -522,8 +525,8 @@ function decodeFavorite(raw: unknown, songs: TrackIdentity[]): FavoriteEntry {
   const c = rec(raw, 'favorites');
   return {
     ...decodeEntry(c, songs, 'favorites'),
-    favoritedAt: num(c.fa, 'favorites') * 1000,
-    lastAccessedAt: num(c.la, 'favorites') * 1000,
+    favoritedAt: num(c.fa, 'favorites'),
+    lastAccessedAt: num(c.la, 'favorites'),
   };
 }
 
@@ -637,7 +640,7 @@ export function encodeChart(chart: ChordChart): CompactChart {
     cov: round3(chart.coverage ?? 0),
     a0: centis(chart.analyzedFrom ?? 0),
     a1: centis(chart.analyzedTo ?? 0),
-    c: secs(chart.computedAt),
+    c: stamp(chart.computedAt),
   };
   if (anyGap) out.g = g;
   if (chart.key) {
@@ -679,12 +682,12 @@ export function decodeChart(raw: unknown): ChordChart {
     coverage: num(c.cov, 'tracks'),
     analyzedFrom: num(c.a0, 'tracks') / 100,
     analyzedTo: num(c.a1, 'tracks') / 100,
-    computedAt: num(c.c, 'tracks') * 1000,
+    computedAt: num(c.c, 'tracks'),
   };
 }
 
 function encodeTrack(track: TrackData, songs: SongTable): CompactTrack {
-  const out: CompactTrack = { i: songs.add(track.identity), at: secs(track.updatedAt) };
+  const out: CompactTrack = { i: songs.add(track.identity), at: stamp(track.updatedAt) };
   if (track.markers?.length) out.m = track.markers.map(encodeMarker);
   if (track.snippets?.length) out.s = track.snippets.map(encodeSnippet);
   if (track.sequenceLoop) out.L = 1;
@@ -705,7 +708,7 @@ function decodeTrack(raw: unknown, songs: TrackIdentity[]): TrackData {
     sequenceLoop: c.L !== undefined,
     sequenceCountIn: c.C !== undefined,
     chordChart: c.ch === undefined ? null : decodeChart(c.ch),
-    updatedAt: num(c.at, 'tracks') * 1000,
+    updatedAt: num(c.at, 'tracks'),
   };
   if (c.ce !== undefined) track.chordsEnabled = num(c.ce, 'tracks') === 1;
   return track;
@@ -714,11 +717,11 @@ function decodeTrack(raw: unknown, songs: TrackIdentity[]): TrackData {
 // ---------------------------------------------------------------------------
 // Whole backup
 
-/** `[name, gains, updatedAt_s?]`. */
+/** `[name, gains, updatedAt?]`. */
 function encodeEqPreset(preset: EqPreset): CompactEqPreset {
   const name = preset.name ?? '';
   const gains = (preset.gains ?? []).map(round2);
-  return preset.updatedAt ? [name, gains, secs(preset.updatedAt)] : [name, gains];
+  return preset.updatedAt ? [name, gains, stamp(preset.updatedAt)] : [name, gains];
 }
 
 function decodeEqPreset(raw: unknown): EqPreset {
@@ -728,7 +731,7 @@ function decodeEqPreset(raw: unknown): EqPreset {
     name: str(r[0], 'eqPresets'),
     gains: arr(r[1], 'eqPresets').map((g) => num(g, 'eqPresets')),
   };
-  if (r.length === 3) preset.updatedAt = num(r[2], 'eqPresets') * 1000;
+  if (r.length === 3) preset.updatedAt = num(r[2], 'eqPresets');
   return preset;
 }
 
@@ -746,7 +749,7 @@ export function encodeBackup(backup: Backup): CompactBackup {
   const out: CompactBackup = {
     format: BACKUP_FORMAT,
     version: COMPACT_VERSION,
-    at: secs(backup.exportedAt),
+    at: stamp(backup.exportedAt),
     s: encodeSettings(backup.settings),
     u: encodeUiPrefs(backup.uiPrefs),
     eq: backup.eqPresets.map(encodeEqPreset),
@@ -758,7 +761,7 @@ export function encodeBackup(backup: Backup): CompactBackup {
   const deletions = Object.entries(normalizeDeletions(backup.deletions)).sort(([a], [b]) =>
     a < b ? -1 : a > b ? 1 : 0,
   );
-  if (deletions.length) out.del = Object.fromEntries(deletions.map(([k, when]) => [k, secs(when)]));
+  if (deletions.length) out.del = Object.fromEntries(deletions.map(([k, when]) => [k, stamp(when)]));
   return out;
 }
 
@@ -772,7 +775,7 @@ export function decodeBackup(raw: unknown): Backup {
   return {
     format: BACKUP_FORMAT,
     version: COMPACT_VERSION,
-    exportedAt: typeof raw.at === 'number' && Number.isFinite(raw.at) ? raw.at * 1000 : 0,
+    exportedAt: typeof raw.at === 'number' && Number.isFinite(raw.at) ? raw.at : 0,
     appVersion: '',
     settings: decodeSettings(raw.s),
     uiPrefs: decodeUiPrefs(raw.u),
@@ -781,7 +784,7 @@ export function decodeBackup(raw: unknown): Backup {
     eqPresets: arr(raw.eq, 'eqPresets').map(decodeEqPreset),
     tracks: arr(raw.t, 'tracks').map((t) => decodeTrack(t, songs)),
     deletions: Object.fromEntries(
-      Object.entries(normalizeDeletions(raw.del)).map(([k, when]) => [k, when * 1000]),
+      Object.entries(normalizeDeletions(raw.del)).map(([k, when]) => [k, when]),
     ),
   };
 }

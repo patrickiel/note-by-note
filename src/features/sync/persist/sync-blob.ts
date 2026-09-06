@@ -141,7 +141,7 @@ export async function packBackup(compact: CompactBackup, app: string): Promise<P
     v: BLOB_VERSION,
     n: chunks.length,
     h: await sha256Hex(base64),
-    at: compact.at * 1000,
+    at: compact.at,
     app,
   };
   const items: Record<string, string | BlobMeta> = { [META_KEY]: meta };

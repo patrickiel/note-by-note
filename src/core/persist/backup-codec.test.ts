@@ -264,11 +264,11 @@ test('eq presets round-trip as tuples, with or without a save time', () => {
   });
   assert.deepEqual(encodeBackup(b).eq, [
     ['Mine', [1, 2.5, 3, 4, 5, 6, 7, 8, 9, 0]],
-    ['Stamped', [0, 0, 0, 0, 0, 0, 0, 0, 0, 1], 1757112346],
+    ['Stamped', [0, 0, 0, 0, 0, 0, 0, 0, 0, 1], 1_757_112_345_678],
   ]);
   const back = roundTrip(b).eqPresets;
   assert.deepEqual(back[0], b.eqPresets[0]);
-  assert.deepEqual(back[1], { ...b.eqPresets[1], updatedAt: 1757112346000 });
+  assert.deepEqual(back[1], { ...b.eqPresets[1], updatedAt: 1_757_112_345_678 });
 });
 
 // ---------------------------------------------------------------------------
@@ -278,12 +278,12 @@ test('recent: a plain YouTube row is an index and a timestamp', () => {
   const b = backup({ history: [entry(ytSong)] });
   const enc = encodeBackup(b);
   assert.deepEqual(enc.songs, [['yt:741FSo7Xb40', 'Symphony of Destruction', 230]]);
-  assert.deepEqual(enc.h, [{ i: 0, at: 1757112346 }]);
+  assert.deepEqual(enc.h, [{ i: 0, at: 1_757_112_345_678 }]);
   const back = roundTrip(b).history[0];
   assert.deepEqual(back.identity, ytSong);
   assert.equal(back.pageUrl, YT_HREF);
   assert.equal(back.thumbnailUrl, YT_THUMB);
-  assert.equal(back.updatedAt, 1757112346000);
+  assert.equal(back.updatedAt, 1_757_112_345_678);
   assert.equal(back.createdAt, back.updatedAt);
   assert.deepEqual(back.params, params());
 });
@@ -431,7 +431,7 @@ test('chart: times land within half a centisecond, gaps and key survive', () => 
   assert.deepEqual(back.key, { tonic: 'A', mode: 'minor', confidence: 0.812 });
   assert.equal(back.coverage, 0.988);
   assert.ok(Math.abs(back.analyzedTo - c.analyzedTo) <= 0.005);
-  assert.equal(back.computedAt, 1757112346000);
+  assert.equal(back.computedAt, 1_757_112_345_678);
 });
 
 test('chart: contiguous segments need no gap array; unsorted input is sorted', () => {
@@ -517,20 +517,20 @@ test('encode is deterministic regardless of track enumeration order', () => {
   assert.deepEqual(encodeBackup(shuffled), encodeBackup(b));
 });
 
-test('deletion records travel in seconds and are omitted when empty', () => {
+test('deletion records travel in ms and are omitted when empty', () => {
   assert.equal('del' in encodeBackup(backup()), false);
   const b = backup({ deletions: { 'h:abc:230': 1_757_112_345_678, 'h:*': 1_757_000_000_000 } });
   const enc = encodeBackup(b);
-  assert.deepEqual(enc.del, { 'h:*': 1757000000, 'h:abc:230': 1757112346 });
-  assert.deepEqual(roundTrip(b).deletions, { 'h:*': 1757000000000, 'h:abc:230': 1757112346000 });
+  assert.deepEqual(enc.del, { 'h:*': 1_757_000_000_000, 'h:abc:230': 1_757_112_345_678 });
+  assert.deepEqual(roundTrip(b).deletions, b.deletions);
   const v1 = JSON.parse(JSON.stringify(backup()));
   delete v1.deletions;
   assert.deepEqual(parseBackupJson(v1).deletions, {});
 });
 
-test('exportedAt is kept to the second; appVersion is dropped', () => {
+test('exportedAt is kept; appVersion is dropped', () => {
   const back = roundTrip(backup());
-  assert.equal(back.exportedAt, 1_757_200_000_000);
+  assert.equal(back.exportedAt, 1_757_200_000_123);
   assert.equal(back.appVersion, '');
   assert.equal(back.version, COMPACT_VERSION);
 });

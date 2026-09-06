@@ -1,7 +1,7 @@
 import { encodeBackup } from '../../../core/persist/backup-codec';
 import { createBackup, restoreBackup, type Backup } from '../../../core/persist/backup';
 import { session } from '../../../core/state/session.svelte';
-import { fitBackup } from '../persist/fit';
+import { fitBackup, type FitResult } from '../persist/fit';
 import { contentHash } from '../persist/hash';
 import { mergeBackups } from '../persist/merge';
 import {
@@ -47,6 +47,7 @@ const SAFETY_INTERVAL_MS = 5 * 60_000;
 const SYNCED_KEY_RE = /^(settings|uiPrefs|history|favorites|eqPresets|deletions|track:)/;
 
 const measure = (backup: Backup) => packedChars(encodeBackup(backup));
+const fit = (backup: Backup) => fitBackup(backup, BUDGET_CHARS, measure);
 
 function isEmpty(backup: Backup): boolean {
   return (
@@ -219,21 +220,21 @@ class SyncStore {
         // Nobody finished that write; ours replaces it. Whatever it carried
         // comes back merged when its writer reconciles against ours.
         this.#tornSince = 0;
-        await this.#push(local, localHash);
+        await this.#push(await fit(local), localHash);
         return;
       }
       this.#tornSince = 0;
 
       if (result.kind === 'none') {
         if (isEmpty(local) && !this.config.pendingPush) return;
-        await this.#push(local, localHash);
+        await this.#push(await fit(local), localHash);
         return;
       }
 
       const { meta, base64 } = result;
       if (meta.h === this.config.lastRemoteHash) {
         // Remote is what we last saw (our own echo included).
-        if (localChanged || this.config.pendingPush) await this.#push(local, localHash);
+        if (localChanged || this.config.pendingPush) await this.#push(await fit(local), localHash);
         else if (this.config.lastError) await this.#saveConfig({ lastError: null });
         return;
       }
@@ -242,12 +243,20 @@ class SyncStore {
       const remote = await unpackBackup(base64);
       const remoteWins = !localChanged || remote.exportedAt > this.config.lastChangedAt;
       const merged = mergeBackups(local, remote, remoteWins);
+      const fitted = await fit(merged);
       const [mergedHash, remoteHash] = await Promise.all([
         contentHash(merged),
         contentHash(remote),
       ]);
       const needApply = mergedHash !== localHash;
-      const needPush = mergedHash !== remoteHash;
+      // Push our own edits, or a full copy the remote lacks. Once the merge
+      // is over the quota only our edits count: two devices holding
+      // different old songs would otherwise cut the copy differently and
+      // re-upload each other's cut forever.
+      const needPush =
+        localChanged ||
+        this.config.pendingPush ||
+        (!fitted.trimmed && mergedHash !== remoteHash);
 
       if (needApply && !force && session.media !== null) {
         // A track is loaded; applying would reload the panel mid-practice.
@@ -266,7 +275,7 @@ class SyncStore {
         await restoreBackup(merged);
       }
       if (needPush) {
-        await this.#push(merged, mergedHash);
+        await this.#push(fitted, mergedHash);
       } else {
         await this.#saveConfig({
           lastSyncedAt: meta.at,
@@ -274,6 +283,7 @@ class SyncStore {
           lastLocalHash: mergedHash,
           pendingPush: false,
           lastError: null,
+          trimmed: fitted.trimmed,
         });
       }
     } catch (err) {
@@ -286,18 +296,17 @@ class SyncStore {
     }
   }
 
-  /** Writes `backup` to the area, cut to the quota if it must be — or, too
-   * soon after the last write, comes back for it later (the next reconcile
-   * reaches the same conclusion; `pendingPush` and the hashes are untouched
-   * until the write lands). `hash` is the content hash of this device's full
-   * data, so a trimmed push doesn't read as "local changed" next time. */
-  async #push(backup: Backup, hash: string) {
+  /** Writes a fitted backup to the area — or, too soon after the last write,
+   * comes back for it later (the next reconcile reaches the same conclusion;
+   * `pendingPush` and the hashes are untouched until the write lands).
+   * `hash` is the content hash of this device's full data, so a trimmed push
+   * doesn't read as "local changed" next time. */
+  async #push(fitted: FitResult, hash: string) {
     const wait = this.#lastPushAt + MIN_PUSH_SPACING_MS - Date.now();
     if (wait > 0) {
       this.#reconcileIn(wait);
       return;
     }
-    const fitted = await fitBackup(backup, BUDGET_CHARS, measure);
     const exportedAt = Date.now();
     const packed = await packBackup(
       encodeBackup({ ...fitted.backup, exportedAt }),
