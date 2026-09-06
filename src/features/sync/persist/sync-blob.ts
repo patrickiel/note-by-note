@@ -129,8 +129,6 @@ export interface PackedBlob {
   /** The items to write, meta included. */
   items: Record<string, string | BlobMeta>;
   meta: BlobMeta;
-  /** base64 length, for the usage readout. */
-  chars: number;
 }
 
 export async function packBackup(compact: CompactBackup, app: string): Promise<PackedBlob> {
@@ -148,7 +146,7 @@ export async function packBackup(compact: CompactBackup, app: string): Promise<P
   };
   const items: Record<string, string | BlobMeta> = { [META_KEY]: meta };
   chunks.forEach((chunk, i) => (items[chunkKey(i)] = chunk));
-  return { items, meta, chars: base64.length };
+  return { items, meta };
 }
 
 /** What the area holds, classified. Only `nbn.*` keys are looked at. */

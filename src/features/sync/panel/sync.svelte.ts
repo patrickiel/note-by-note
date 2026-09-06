@@ -13,8 +13,8 @@ import {
   unpackBackup,
 } from '../persist/sync-blob';
 import {
-  classifySyncError,
   clearSyncArea,
+  isRateLimited,
   onSyncAreaChanged,
   readSyncArea,
   syncErrorMessage,
@@ -66,22 +66,27 @@ function isEmpty(backup: Backup): boolean {
  *
  * One routine, `#reconcile`, does everything: read the area, compare with
  * what this device last saw, merge, then write locally and/or remotely as
- * needed. Local changes (storage events) and remote ones (sync-area events)
- * both just ask for a reconcile. Applying a merge that changes local data
- * ends in a panel reload — stores read storage once at start-up, same as the
- * import flow — so that is deferred while a track is loaded and picked up on
- * the next quiet moment, panel open, or "Sync now".
+ * needed. Local changes (storage events), remote ones (sync-area events),
+ * retries and the push debounce all just ask for a reconcile later — one
+ * timer, latest request wins — and the push spacing is enforced in `#push`.
+ * Applying a merge that changes local data ends in a panel reload — stores
+ * read storage once at start-up, same as the import flow — so that is
+ * deferred while a track is loaded and picked up on the next quiet moment,
+ * panel open, or "Sync now".
  *
- * Runs only in the sidepanel: it is the sole writer of synced data, so there
- * is nothing to observe while it's closed. A change the panel didn't manage
- * to push before closing is remembered via `pendingPush`.
+ * Runs in every open panel document (there can be more than one: a Firefox
+ * window each, the local-player tab). They share `syncConfig` through its
+ * watch, so at worst two push the same content, which the spacing absorbs.
+ * A change the panel didn't manage to push before closing is remembered via
+ * `pendingPush`.
  */
 class SyncStore {
-  enabled = $state(false);
-  lastSyncedAt = $state(0);
-  lastError = $state<string | null>(null);
+  config = $state<SyncConfig>({ ...DEFAULT_SYNC_CONFIG });
+  enabled = $derived(this.config.enabled);
+  lastSyncedAt = $derived(this.config.lastSyncedAt);
+  lastError = $derived(this.config.lastError);
   /** The last push left old songs or charts out to fit the quota. */
-  trimmed = $state(false);
+  trimmed = $derived(this.config.trimmed);
   /** Bytes the area holds, by the browser's accounting. */
   usedBytes = $state(0);
   /** Another device's changes are in, waiting for a moment without a track
@@ -96,63 +101,52 @@ class SyncStore {
     this.usedBytes ? Math.max(1, Math.round((this.usedBytes / SYNC_QUOTA_BYTES) * 100)) : 0,
   );
 
-  #config: SyncConfig = { ...DEFAULT_SYNC_CONFIG };
-  /** Suppresses the echo of our own `syncConfigItem` write. */
-  #writing = false;
   /** Suppresses local change events while a merge is being written. */
   #applying = false;
-  #pushTimer: ReturnType<typeof setTimeout> | undefined;
-  #remoteTimer: ReturnType<typeof setTimeout> | undefined;
-  #retryTimer: ReturnType<typeof setTimeout> | undefined;
+  #timer: ReturnType<typeof setTimeout> | undefined;
   #lastPushAt = 0;
   #tornSince = 0;
   /** Serializes reconciles so they can't interleave. */
   #queue: Promise<unknown> = Promise.resolve();
 
   async init() {
-    this.#config = await loadSyncConfig();
-    this.#reflect();
+    this.config = await loadSyncConfig();
+    // Another panel document's bookkeeping, and the echo of our own writes
+    // (which is the value already held — harmless).
     syncConfigItem.watch((value) => {
-      if (this.#writing) return;
-      this.#config = value ?? { ...DEFAULT_SYNC_CONFIG };
-      this.#reflect();
+      this.config = value ?? { ...DEFAULT_SYNC_CONFIG };
     });
     browser.storage.local.onChanged.addListener((changes) => {
-      if (this.#applying || !this.#config.enabled) return;
+      if (this.#applying || !this.config.enabled) return;
       if (!Object.keys(changes).some((key) => SYNCED_KEY_RE.test(key))) return;
-      this.#onDataChanged();
+      // Persisted immediately (not on the debounce) so a panel closed
+      // mid-burst still knows there is unpushed data next time it opens.
+      void this.#saveConfig({ pendingPush: true, lastChangedAt: Date.now() });
+      this.#reconcileIn(PUSH_DEBOUNCE_MS);
     });
     onSyncAreaChanged(() => {
-      if (!this.#config.enabled) return;
-      clearTimeout(this.#remoteTimer);
-      this.#remoteTimer = setTimeout(() => {
-        void this.#enqueue(() => this.#reconcile({ allowApply: session.media === null }));
-      }, REMOTE_DEBOUNCE_MS);
+      if (this.config.enabled) this.#reconcileIn(REMOTE_DEBOUNCE_MS);
     });
-    if (this.#config.enabled) {
-      await this.#enqueue(() => this.#reconcile({ allowApply: true }));
-    }
+    if (this.config.enabled) await this.#enqueue(() => this.#reconcile(true));
     setInterval(() => {
-      if (!this.#config.enabled) return;
-      void this.#enqueue(() => this.#reconcile({ allowApply: session.media === null }));
+      if (this.config.enabled) void this.#enqueue(() => this.#reconcile());
     }, SAFETY_INTERVAL_MS);
   }
 
   async enable(): Promise<void> {
     await this.#saveConfig({ enabled: true, lastError: null });
-    await this.#enqueue(() => this.#reconcile({ allowApply: true }));
+    await this.#enqueue(() => this.#reconcile(true));
   }
 
   async disable(): Promise<void> {
-    clearTimeout(this.#pushTimer);
-    clearTimeout(this.#retryTimer);
+    clearTimeout(this.#timer);
     this.pendingApply = false;
     await this.#saveConfig({ enabled: false });
   }
 
   /** Back up now and pull in the other devices' changes, reload included. */
   async syncNow(): Promise<void> {
-    await this.#enqueue(() => this.#reconcile({ allowApply: true }));
+    await this.#enqueue(() => this.#reconcile(true));
   }
 
   /**
@@ -161,23 +155,13 @@ class SyncStore {
    * their own data the next time they change something.
    */
   async deleteRemote(): Promise<void> {
-    clearTimeout(this.#pushTimer);
-    clearTimeout(this.#retryTimer);
-    this.pendingApply = false;
+    await this.disable();
     await this.#enqueue(async () => {
       this.#syncing = true;
       try {
         await clearSyncArea();
         this.usedBytes = 0;
-        await this.#saveConfig({
-          enabled: false,
-          lastSyncedAt: 0,
-          lastRemoteHash: null,
-          lastLocalHash: null,
-          pendingPush: false,
-          lastError: null,
-          trimmed: false,
-        });
+        await this.#saveConfig({ ...DEFAULT_SYNC_CONFIG, enabled: false });
       } catch (err) {
         await this.#saveConfig({ lastError: syncErrorMessage(err) });
         throw err;
@@ -187,22 +171,9 @@ class SyncStore {
     });
   }
 
-  #reflect() {
-    this.enabled = this.#config.enabled;
-    this.lastSyncedAt = this.#config.lastSyncedAt;
-    this.lastError = this.#config.lastError;
-    this.trimmed = this.#config.trimmed;
-  }
-
   async #saveConfig(patch: Partial<SyncConfig>) {
-    this.#config = { ...this.#config, ...patch };
-    this.#reflect();
-    this.#writing = true;
-    try {
-      await syncConfigItem.setValue(this.#config);
-    } finally {
-      this.#writing = false;
-    }
+    this.config = { ...this.config, ...patch };
+    await syncConfigItem.setValue($state.snapshot(this.config));
   }
 
   #enqueue<T>(op: () => Promise<T>): Promise<T> {
@@ -211,28 +182,10 @@ class SyncStore {
     return result;
   }
 
-  #onDataChanged() {
-    // Persisted immediately (not on the debounce) so a panel closed mid-burst
-    // still knows there is unpushed data next time it opens.
-    void this.#saveConfig({ pendingPush: true, lastChangedAt: Date.now() });
-    this.#schedulePush(PUSH_DEBOUNCE_MS);
-  }
-
-  #schedulePush(delayMs: number) {
-    clearTimeout(this.#pushTimer);
-    const spacing = this.#lastPushAt + MIN_PUSH_SPACING_MS - Date.now();
-    this.#pushTimer = setTimeout(
-      () => void this.#enqueue(() => this.#reconcile({ allowApply: session.media === null })),
-      Math.max(delayMs, spacing),
-    );
-  }
-
-  #retryIn(delayMs: number) {
-    clearTimeout(this.#retryTimer);
-    this.#retryTimer = setTimeout(
-      () => void this.#enqueue(() => this.#reconcile({ allowApply: session.media === null })),
-      delayMs,
-    );
+  /** Reconcile after `delayMs`; a later request replaces an earlier one. */
+  #reconcileIn(delayMs: number) {
+    clearTimeout(this.#timer);
+    this.#timer = setTimeout(() => void this.#enqueue(() => this.#reconcile()), delayMs);
   }
 
   /**
@@ -241,9 +194,13 @@ class SyncStore {
    *  - torn → wait for the rest to land, retry;
    *  - unchanged since last look → push if this device changed something;
    *  - otherwise merge the two copies, write the result wherever it differs.
+   *
+   * Applying (writing a merge locally) reloads the panel, so it waits for a
+   * moment without a track loaded unless `force` — "Sync now", enabling,
+   * opening the panel.
    */
-  async #reconcile(opts: { allowApply: boolean }) {
-    if (!this.#config.enabled) return;
+  async #reconcile(force = false) {
+    if (!this.config.enabled) return;
     this.#syncing = true;
     let applied = false;
     try {
@@ -251,12 +208,12 @@ class SyncStore {
       this.usedBytes = bytes;
       const local = await createBackup();
       const localHash = await contentHash(local);
-      const localChanged = localHash !== this.#config.lastLocalHash;
+      const localChanged = localHash !== this.config.lastLocalHash;
 
       if (result.kind === 'torn') {
         if (!this.#tornSince) this.#tornSince = Date.now();
         if (Date.now() - this.#tornSince < TORN_GIVE_UP_MS) {
-          this.#retryIn(TORN_RETRY_MS);
+          this.#reconcileIn(TORN_RETRY_MS);
           return;
         }
         // Nobody finished that write; ours replaces it. Whatever it carried
@@ -268,22 +225,22 @@ class SyncStore {
       this.#tornSince = 0;
 
       if (result.kind === 'none') {
-        if (isEmpty(local) && !this.#config.pendingPush) return;
+        if (isEmpty(local) && !this.config.pendingPush) return;
         await this.#push(local, localHash);
         return;
       }
 
       const { meta, base64 } = result;
-      if (meta.h === this.#config.lastRemoteHash) {
+      if (meta.h === this.config.lastRemoteHash) {
         // Remote is what we last saw (our own echo included).
-        if (localChanged || this.#config.pendingPush) await this.#push(local, localHash);
-        else if (this.#config.lastError) await this.#saveConfig({ lastError: null });
+        if (localChanged || this.config.pendingPush) await this.#push(local, localHash);
+        else if (this.config.lastError) await this.#saveConfig({ lastError: null });
         return;
       }
 
       // Another device wrote since we last looked.
       const remote = await unpackBackup(base64);
-      const remoteWins = !localChanged || remote.exportedAt > this.#config.lastChangedAt;
+      const remoteWins = !localChanged || remote.exportedAt > this.config.lastChangedAt;
       const merged = mergeBackups(local, remote, remoteWins);
       const [mergedHash, remoteHash] = await Promise.all([
         contentHash(merged),
@@ -292,7 +249,7 @@ class SyncStore {
       const needApply = mergedHash !== localHash;
       const needPush = mergedHash !== remoteHash;
 
-      if (needApply && !opts.allowApply) {
+      if (needApply && !force && session.media !== null) {
         // A track is loaded; applying would reload the panel mid-practice.
         // Nothing is pushed either: a push now would carry only our side.
         this.pendingApply = true;
@@ -301,11 +258,12 @@ class SyncStore {
       this.pendingApply = false;
       if (needApply) {
         // #applying stays set until the reload: nothing in between may
-        // schedule a push of what was just written.
+        // schedule a push of what was just written. The reload is owed from
+        // here on, even if the restore fails halfway.
         this.#applying = true;
-        clearTimeout(this.#pushTimer);
-        await restoreBackup(merged);
+        clearTimeout(this.#timer);
         applied = true;
+        await restoreBackup(merged);
       }
       if (needPush) {
         await this.#push(merged, mergedHash);
@@ -320,19 +278,25 @@ class SyncStore {
       }
     } catch (err) {
       await this.#saveConfig({ lastError: syncErrorMessage(err) });
-      if (classifySyncError(err) === 'rate') this.#retryIn(RATE_LIMIT_RETRY_MS);
+      if (isRateLimited(err)) this.#reconcileIn(RATE_LIMIT_RETRY_MS);
     } finally {
       this.#syncing = false;
-      // Local data changed under the stores (same situation as an import):
-      // the reload is owed whether or not the push after it went through.
+      // Local data changed under the stores (same situation as an import).
       if (applied) location.reload();
     }
   }
 
-  /** Writes `backup` to the area, cut to the quota if it must be. `hash` is
-   * the content hash of this device's full data, so a trimmed push doesn't
-   * read as "local changed" on the next pass. */
+  /** Writes `backup` to the area, cut to the quota if it must be — or, too
+   * soon after the last write, comes back for it later (the next reconcile
+   * reaches the same conclusion; `pendingPush` and the hashes are untouched
+   * until the write lands). `hash` is the content hash of this device's full
+   * data, so a trimmed push doesn't read as "local changed" next time. */
   async #push(backup: Backup, hash: string) {
+    const wait = this.#lastPushAt + MIN_PUSH_SPACING_MS - Date.now();
+    if (wait > 0) {
+      this.#reconcileIn(wait);
+      return;
+    }
     const fitted = await fitBackup(backup, BUDGET_CHARS, measure);
     const exportedAt = Date.now();
     const packed = await packBackup(

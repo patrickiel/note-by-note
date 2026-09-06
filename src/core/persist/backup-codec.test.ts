@@ -555,7 +555,7 @@ test('a v2 file routes through the codec; anything newer or foreign is refused',
   assert.throws(() => parseBackupJson('nope'), /isn't a Note by Note backup/);
   assert.throws(
     () => parseBackupJson({ format: BACKUP_FORMAT, version: 1, settings: {} }),
-    /"history" list is missing or damaged/,
+    /"history" list is damaged/,
   );
 });
 
@@ -566,7 +566,7 @@ test('damaged v2 input is refused with the section named', () => {
     fn(raw);
     return () => decodeBackup(raw);
   };
-  assert.throws(mutate((r) => delete r.songs), /"songs" list is missing or damaged/);
+  assert.throws(mutate((r) => delete r.songs), /"songs" list is damaged/);
   assert.throws(mutate((r) => r.songs[0][0] = 'yt:bad/id'), /"songs" list is damaged/);
   assert.throws(mutate((r) => r.h[0].i = 99), /"history" list is damaged/);
   assert.throws(mutate((r) => r.h[0].at = 'now'), /"history" list is damaged/);

@@ -1,13 +1,4 @@
-import { LibraryTooLargeError } from './fit';
-import {
-  chunkKey,
-  isBlobKey,
-  itemsBytes,
-  NewerVersionError,
-  readBlob,
-  type BlobMeta,
-  type ReadResult,
-} from './sync-blob';
+import { isBlobKey, itemsBytes, readBlob, type BlobMeta, type ReadResult } from './sync-blob';
 
 /**
  * The `browser.storage.sync` side of the blob layout in `sync-blob.ts`:
@@ -53,33 +44,25 @@ export async function clearSyncArea(): Promise<void> {
  * `storage.sync.onChanged`, which older Firefox lacks. */
 export function onSyncAreaChanged(listener: () => void): void {
   browser.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'sync') return;
-    if (Object.keys(changes).some((key) => isBlobKey(key) || key === chunkKey(0))) listener();
+    if (area === 'sync' && Object.keys(changes).some(isBlobKey)) listener();
   });
 }
 
-export type SyncErrorKind = 'rate' | 'quota' | 'newer' | 'other';
+const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-/** The browser reports quota trouble as thrown strings/errors with these
+/** The browser reports write metering as thrown strings/errors with these
  * names in the message; there is no error code to switch on. */
-export function classifySyncError(err: unknown): SyncErrorKind {
-  if (err instanceof NewerVersionError) return 'newer';
-  if (err instanceof LibraryTooLargeError) return 'quota';
-  const text = err instanceof Error ? err.message : String(err);
-  if (/MAX_WRITE_OPERATIONS|MAX_SUSTAINED_WRITE|MAX_ITEMS/i.test(text)) return 'rate';
-  if (/QUOTA_BYTES|QuotaExceeded|quota/i.test(text)) return 'quota';
-  return 'other';
+export function isRateLimited(err: unknown): boolean {
+  return /MAX_WRITE_OPERATIONS|MAX_SUSTAINED_WRITE|MAX_ITEMS/i.test(errorText(err));
 }
 
+/** Our own errors (`NewerVersionError`, `LibraryTooLargeError`) already read
+ * well; the browser's quota and metering ones are translated. */
 export function syncErrorMessage(err: unknown): string {
-  switch (classifySyncError(err)) {
-    case 'rate':
-      return 'The browser is rate-limiting sync writes — retrying in a minute.';
-    case 'quota':
-      return "Your library is too large for the browser's sync storage.";
-    case 'newer':
-      return 'Synced data was written by a newer version of Note by Note.';
-    default:
-      return err instanceof Error && err.message ? err.message : 'Sync failed.';
+  const text = errorText(err);
+  if (isRateLimited(err)) return 'The browser is rate-limiting sync writes — retrying in a minute.';
+  if (/QUOTA_BYTES|QuotaExceeded|quota/i.test(text)) {
+    return "Your library is too large for the browser's sync storage.";
   }
+  return text || 'Sync failed.';
 }

@@ -103,7 +103,10 @@ test('chunking and keys', () => {
 
 test('pack → items → read → unpack round-trips within the per-item and total limits', async () => {
   const b = library(40);
-  const { items, meta, chars } = await packBackup(encodeBackup(b), '1.0.3');
+  const { items, meta } = await packBackup(encodeBackup(b), '1.0.3');
+  const chars = Object.entries(items)
+    .filter(([key]) => key !== META_KEY)
+    .reduce((n, [, chunk]) => n + (chunk as string).length, 0);
   assert.equal(meta.n, Math.ceil(chars / CHUNK_CHARS));
   assert.equal(meta.at, T0);
   for (const [key, value] of Object.entries(items)) {

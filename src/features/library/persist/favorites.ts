@@ -1,7 +1,7 @@
 import type { EffectParams, HistoryEntry, TrackIdentity } from '../../../core/model/types';
 import { isSameTrack, songKey } from '../../../core/model/track-identity';
 import { favoriteDeletion } from '../../../core/persist/deletions';
-import { clearDeletion, favoritesItem, recordDeletion } from '../../../core/persist/storage';
+import { favoritesItem, recordDeletion } from '../../../core/persist/storage';
 
 /** Star a song: copy the history entry into the Favorites library (top of the
  * manual order). No-op if already favorited. */
@@ -15,8 +15,6 @@ export async function addFavorite(entry: HistoryEntry): Promise<void> {
     { ...entry, favoritedAt: now, lastAccessedAt: now },
     ...list,
   ]);
-  // Starred again after an unstar: the deletion record must not outlive it.
-  await clearDeletion(favoriteDeletion(songKey(entry.identity)));
 }
 
 /** Dated (`deletions.ts`, by song — every copy of it, whatever duration it

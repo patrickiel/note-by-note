@@ -1,21 +1,22 @@
+import { songKey } from '../../../core/model/track-identity.ts';
 import type { Backup } from '../../../core/persist/backup-codec.ts';
-import type { FavoriteEntry, HistoryEntry, TrackData, TrackIdentity } from '../../../core/model/types';
+import type { HistoryEntry, TrackData, TrackIdentity } from '../../../core/model/types';
 
 /**
  * Cuts a backup down to a byte budget — the browser's sync quota — by
  * dropping old things rather than capping counts. Nothing is trimmed while it
- * fits; when it doesn't, tiers go in this order, each from its oldest end,
- * and each cut no deeper than needed:
+ * fits; when it doesn't, the cuttable things form one ordered list and the
+ * shortest prefix of it that makes the rest fit is dropped:
  *
  *   1. songs that aren't favorited: their Recent row and track record, by
  *      how recently they were played or edited (orphan records — a song no
- *      longer in Recent — sit in this tier by their own edit time);
+ *      longer in Recent — sit here by their own edit time);
  *   2. chord charts, by when they were computed (they can be re-analyzed);
  *   3. favorites, with their Recent row and track record, by last access.
  *
- * Settings, UI prefs and EQ presets are never cut. Songs are matched the way
- * the library does (`isSameTrack`), so a record saved under a drifted
- * duration still follows its favorite.
+ * Each group oldest first. Settings, UI prefs and EQ presets are never cut.
+ * Songs are matched the way the library does (`songKey`: URL + title), so a
+ * record saved under a drifted duration still follows its favorite.
  *
  * `measure` is injected (and may be async): the caller decides what "size"
  * means — encoded JSON length in tests, the gzip+base64 blob for sync — so
@@ -38,92 +39,63 @@ export class LibraryTooLargeError extends Error {
   }
 }
 
-/** How many of each tier's items (newest first) the built backup keeps. */
-interface Plan {
-  songs: number;
-  charts: number;
-  favorites: number;
+export const hasChart = (track: TrackData) =>
+  !!track.chordChart && track.chordChart.segments.length > 0;
+
+/** A song (by `songKey`, row + record) or a chart (by track key). */
+interface Cut {
+  kind: 'song' | 'chart';
+  id: string;
+  recency: number;
 }
 
-const TIERS: readonly (keyof Plan)[] = ['songs', 'charts', 'favorites'];
+/** Oldest first; equal dates by id, so equal input cuts the same way. */
+const oldestFirst = (a: Cut, b: Cut) =>
+  a.recency - b.recency || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
 
-/** The library matches rows by song, not key — see `isSameTrack`. */
-const songId = (identity: TrackIdentity) => `${identity.normalizedUrl}\n${identity.title}`;
-
-const byRecency = (a: { recency: number; key: string }, b: { recency: number; key: string }) =>
-  b.recency - a.recency || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
-
-const hasChart = (track: TrackData) => !!track.chordChart && track.chordChart.segments.length > 0;
-
-interface Tiers {
-  /** Non-favorited songs, newest first. */
-  songs: { id: string; recency: number; key: string }[];
-  /** Chart-bearing track records, newest chart first. */
-  charts: { key: string; recency: number }[];
-  /** Favorites' songs, most recently accessed first. */
-  favorites: { id: string; recency: number; key: string }[];
-}
-
-function collectTiers(backup: Backup): Tiers {
-  const favoriteIds = new Set(backup.favorites.map((f) => songId(f.identity)));
-  const songs = new Map<string, { id: string; recency: number; key: string }>();
-  const touch = (identity: TrackIdentity, recency: number) => {
-    const id = songId(identity);
-    if (favoriteIds.has(id)) return;
-    const current = songs.get(id);
-    if (!current) songs.set(id, { id, recency, key: identity.key });
-    else current.recency = Math.max(current.recency, recency);
+/** Everything that may go, in the order it goes. */
+function collectCuts(backup: Backup): Cut[] {
+  const favorites = new Set(backup.favorites.map((f) => songKey(f.identity)));
+  const songs = new Map<string, number>();
+  const touch = (identity: TrackIdentity, at: number) => {
+    const id = songKey(identity);
+    if (!favorites.has(id)) songs.set(id, Math.max(songs.get(id) ?? 0, at));
   };
   for (const entry of backup.history) touch(entry.identity, entry.updatedAt ?? 0);
   for (const track of backup.tracks) touch(track.identity, track.updatedAt ?? 0);
 
+  const accessed = new Map<string, number>();
+  for (const f of backup.favorites) {
+    const id = songKey(f.identity);
+    const at = f.lastAccessedAt ?? f.updatedAt ?? 0;
+    accessed.set(id, Math.max(accessed.get(id) ?? 0, at));
+  }
+
+  const asCuts = (kind: Cut['kind'], m: Map<string, number>) =>
+    [...m].map(([id, recency]) => ({ kind, id, recency })).sort(oldestFirst);
   const charts = backup.tracks
     .filter(hasChart)
-    .map((t) => ({ key: t.identity.key, recency: t.chordChart!.computedAt ?? 0 }))
-    .sort(byRecency);
-
-  const favorites = new Map<string, { id: string; recency: number; key: string }>();
-  for (const f of backup.favorites) {
-    const id = songId(f.identity);
-    const recency = f.lastAccessedAt ?? f.updatedAt ?? 0;
-    const current = favorites.get(id);
-    if (!current) favorites.set(id, { id, recency, key: f.identity.key });
-    else current.recency = Math.max(current.recency, recency);
-  }
-
-  return {
-    songs: [...songs.values()].sort(byRecency),
-    charts,
-    favorites: [...favorites.values()].sort(byRecency),
-  };
+    .map((t) => ({ kind: 'chart' as const, id: t.identity.key, recency: t.chordChart!.computedAt ?? 0 }))
+    .sort(oldestFirst);
+  return [...asCuts('song', songs), ...charts, ...asCuts('song', accessed)];
 }
 
-function build(backup: Backup, tiers: Tiers, plan: Plan): Backup {
-  const kept = new Set<string>();
-  for (const s of tiers.songs.slice(0, plan.songs)) kept.add(s.id);
-  for (const f of tiers.favorites.slice(0, plan.favorites)) kept.add(f.id);
-  const keptCharts = new Set(tiers.charts.slice(0, plan.charts).map((c) => c.key));
-
-  const keepRow = (row: HistoryEntry | FavoriteEntry) => kept.has(songId(row.identity));
-  const tracks: TrackData[] = [];
-  for (const track of backup.tracks) {
-    if (!kept.has(songId(track.identity))) continue;
-    if (hasChart(track) && !keptCharts.has(track.identity.key)) {
-      tracks.push({ ...track, chordChart: null });
-    } else {
-      tracks.push(track);
-    }
-  }
+function apply(backup: Backup, cuts: Cut[]): Backup {
+  const songs = new Set(cuts.filter((c) => c.kind === 'song').map((c) => c.id));
+  const charts = new Set(cuts.filter((c) => c.kind === 'chart').map((c) => c.id));
+  const keep = (row: HistoryEntry | TrackData) => !songs.has(songKey(row.identity));
   return {
     ...backup,
-    history: backup.history.filter(keepRow),
-    favorites: backup.favorites.filter(keepRow),
-    tracks,
+    history: backup.history.filter(keep),
+    favorites: backup.favorites.filter(keep),
+    tracks: backup.tracks
+      .filter(keep)
+      .map((t) => (charts.has(t.identity.key) ? { ...t, chordChart: null } : t)),
   };
 }
 
 /**
- * The largest backup, in the tier order above, whose `measure` is at most
+ * The largest backup, in the order above, whose `measure` is at most
  * `budget`. Deterministic for equal input. Throws `LibraryTooLargeError`
  * when nothing cuttable is left and it still doesn't fit.
  */
@@ -132,40 +104,26 @@ export async function fitBackup(
   budget: number,
   measure: (backup: Backup) => number | Promise<number>,
 ): Promise<FitResult> {
-  const tiers = collectTiers(backup);
-  const full: Plan = {
-    songs: tiers.songs.length,
-    charts: tiers.charts.length,
-    favorites: tiers.favorites.length,
-  };
   const size = await measure(backup);
   if (size <= budget) return { backup, trimmed: false, size };
 
-  const plan = { ...full };
-  const sizeOf = (p: Plan) => Promise.resolve(measure(build(backup, tiers, p)));
-  for (const tier of TIERS) {
-    // Earlier tiers are already empty. Does emptying this one fit?
-    const empty = await sizeOf({ ...plan, [tier]: 0 });
-    if (empty > budget) {
-      plan[tier] = 0;
-      continue;
+  // Size only shrinks as more of the list goes, so binary-search the
+  // shortest prefix that fits: `lo` is known not to, `hi` is known to.
+  const cuts = collectCuts(backup);
+  const sizeOf = (n: number) => measure(apply(backup, cuts.slice(0, n)));
+  let lo = 0;
+  let hi = cuts.length;
+  let hiSize = await sizeOf(hi);
+  if (hiSize > budget) throw new LibraryTooLargeError();
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    const s = await sizeOf(mid);
+    if (s <= budget) {
+      hi = mid;
+      hiSize = s;
+    } else {
+      lo = mid;
     }
-    // Yes — keep as many of its newest items as still fit.
-    let lo = 0; // known to fit
-    let hi = plan[tier]; // known not to fit (full plan didn't)
-    let loSize = empty;
-    while (hi - lo > 1) {
-      const mid = (lo + hi) >> 1;
-      const s = await sizeOf({ ...plan, [tier]: mid });
-      if (s <= budget) {
-        lo = mid;
-        loSize = s;
-      } else {
-        hi = mid;
-      }
-    }
-    plan[tier] = lo;
-    return { backup: build(backup, tiers, plan), trimmed: true, size: loSize };
   }
-  throw new LibraryTooLargeError();
+  return { backup: apply(backup, cuts.slice(0, hi)), trimmed: true, size: hiSize };
 }

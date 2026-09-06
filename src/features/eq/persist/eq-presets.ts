@@ -1,5 +1,5 @@
 import { presetDeletion } from '../../../core/persist/deletions';
-import { clearDeletion, eqPresetsItem, recordDeletion } from '../../../core/persist/storage';
+import { eqPresetsItem, recordDeletion } from '../../../core/persist/storage';
 
 /** Save the current curve under `name`. An existing preset with that name is
  * replaced in place — that's the edit and rename path, so there's no separate
@@ -16,7 +16,6 @@ export async function saveEqPreset(name: string, gains: number[]): Promise<void>
     next[index] = preset;
     await eqPresetsItem.setValue(next);
   }
-  await clearDeletion(presetDeletion(name));
 }
 
 /** Dated (`deletions.ts`) so a sync merge with another device's copy doesn't

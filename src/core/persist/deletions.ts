@@ -29,40 +29,19 @@ export const HISTORY_CLEARED = 'h:*';
 export const DELETION_TTL_MS = 30 * 24 * 60 * 60_000;
 export const DELETION_CAP = 200;
 
-/** When `key` was deleted, or 0 if it wasn't. */
-export function deletedAt(deletions: Deletions, key: string): number {
-  return deletions[key] ?? 0;
-}
-
-/** Whether a Recent row with `updatedAt` is covered by a deletion — its own
- * or a "Clear Recent" — dated at or after it. */
-export function historyDeleted(deletions: Deletions, songKey: string, updatedAt: number): boolean {
-  const when = Math.max(
-    deletedAt(deletions, historyDeletion(songKey)),
-    deletedAt(deletions, HISTORY_CLEARED),
-  );
-  return when > 0 && when >= updatedAt;
-}
-
-export function favoriteDeleted(deletions: Deletions, songKey: string, since: number): boolean {
-  const when = deletedAt(deletions, favoriteDeletion(songKey));
-  return when > 0 && when >= since;
-}
-
-/** Presets saved before they carried `updatedAt` read as 0: a deletion
- * always beats them, a later save always beats the deletion. */
-export function presetDeleted(deletions: Deletions, name: string, updatedAt: number): boolean {
-  const when = deletedAt(deletions, presetDeletion(name));
-  return when > 0 && when >= updatedAt;
+/** Whether any of `keys` carries a deletion dated at or after `since` — the
+ * item's own save time, so a later re-add always beats the record. */
+export function deletedSince(deletions: Deletions, since: number, ...keys: string[]): boolean {
+  return keys.some((key) => {
+    const when = deletions[key] ?? 0;
+    return when > 0 && when >= since;
+  });
 }
 
 /** Newest date per key. */
 export function mergeDeletions(a: Deletions, b: Deletions): Deletions {
   const out: Deletions = { ...a };
-  for (const [key, when] of Object.entries(b)) {
-    if (typeof when !== 'number') continue;
-    out[key] = Math.max(out[key] ?? 0, when);
-  }
+  for (const [key, when] of Object.entries(b)) out[key] = Math.max(out[key] ?? 0, when);
   return out;
 }
 

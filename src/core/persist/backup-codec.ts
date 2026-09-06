@@ -208,30 +208,12 @@ export interface CompactBackup {
 // ---------------------------------------------------------------------------
 // Shared helpers
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function damaged(section: string): Error {
   return new Error(`This backup's "${section}" list is damaged.`);
-}
-
-export function requireArray(value: unknown, field: string): unknown[] {
-  if (!Array.isArray(value)) {
-    throw new Error(`This backup's "${field}" list is missing or damaged.`);
-  }
-  return value;
-}
-
-/** Entries are keyed by `identity.key`; without one they can't be stored or
- * matched back to a track, so a file carrying them is not usable. */
-export function requireKeyedArray<T>(value: unknown, field: string): T[] {
-  const list = requireArray(value, field);
-  const keyed = list.every(
-    (e) => isRecord(e) && isRecord(e.identity) && typeof e.identity.key === 'string',
-  );
-  if (!keyed) throw damaged(field);
-  return list as T[];
 }
 
 const roundTo = (dp: number) => {
@@ -262,6 +244,17 @@ function arr(value: unknown, section: string): unknown[] {
 function rec(value: unknown, section: string): Record<string, unknown> {
   if (!isRecord(value)) throw damaged(section);
   return value;
+}
+
+/** Entries are keyed by `identity.key`; without one they can't be stored or
+ * matched back to a track, so a file carrying them is not usable. */
+function keyedArr<T>(value: unknown, section: string): T[] {
+  const list = arr(value, section);
+  const keyed = list.every(
+    (e) => isRecord(e) && isRecord(e.identity) && typeof e.identity.key === 'string',
+  );
+  if (!keyed) throw damaged(section);
+  return list as T[];
 }
 
 function jsonEqual(a: unknown, b: unknown): boolean {
@@ -467,7 +460,7 @@ class SongTable {
 }
 
 function decodeSongs(raw: unknown): TrackIdentity[] {
-  return requireArray(raw, 'songs').map((row) => {
+  return arr(raw, 'songs').map((row) => {
     const r = arr(row, 'songs');
     if (r.length < 3 || r.length > 4) throw damaged('songs');
     const normalizedUrl = longUrl(str(r[0], 'songs'));
@@ -584,13 +577,9 @@ function encodeSnippet(snippet: Snippet): CompactSnippet {
     snippet.enabled === false ? 0 : 1,
     overrides,
   ];
-  if (Object.keys(overrides).length === 0) {
-    out.pop();
-    if (out[4] === 1) {
-      out.pop();
-      if (out[3] === 1) out.pop();
-    }
-  }
+  // Trailing defaults are left out: `{}` overrides, enabled, one repeat.
+  const isDefault = (v: unknown) => v === 1 || (isRecord(v) && Object.keys(v).length === 0);
+  while (out.length > 3 && isDefault(out[out.length - 1])) out.pop();
   return out;
 }
 
@@ -787,10 +776,10 @@ export function decodeBackup(raw: unknown): Backup {
     appVersion: '',
     settings: decodeSettings(raw.s),
     uiPrefs: decodeUiPrefs(raw.u),
-    history: requireArray(raw.h, 'history').map((e) => decodeEntry(e, songs, 'history')),
-    favorites: requireArray(raw.f, 'favorites').map((e) => decodeFavorite(e, songs)),
-    eqPresets: requireArray(raw.eq, 'eqPresets').map(decodeEqPreset),
-    tracks: requireArray(raw.t, 'tracks').map((t) => decodeTrack(t, songs)),
+    history: arr(raw.h, 'history').map((e) => decodeEntry(e, songs, 'history')),
+    favorites: arr(raw.f, 'favorites').map((e) => decodeFavorite(e, songs)),
+    eqPresets: arr(raw.eq, 'eqPresets').map(decodeEqPreset),
+    tracks: arr(raw.t, 'tracks').map((t) => decodeTrack(t, songs)),
     deletions: Object.fromEntries(
       Object.entries(normalizeDeletions(raw.del)).map(([k, when]) => [k, when * 1000]),
     ),
@@ -814,10 +803,10 @@ function normalizeV1(raw: Record<string, unknown>): Backup {
       ...(JSON.parse(JSON.stringify(DEFAULT_UI_PREFS)) as UiPrefs),
       ...(isRecord(raw.uiPrefs) ? raw.uiPrefs : {}),
     },
-    history: requireKeyedArray<HistoryEntry>(raw.history, 'history'),
-    favorites: requireKeyedArray<FavoriteEntry>(raw.favorites, 'favorites'),
-    eqPresets: requireArray(raw.eqPresets, 'eqPresets') as EqPreset[],
-    tracks: requireKeyedArray<TrackData>(raw.tracks, 'tracks'),
+    history: keyedArr<HistoryEntry>(raw.history, 'history'),
+    favorites: keyedArr<FavoriteEntry>(raw.favorites, 'favorites'),
+    eqPresets: arr(raw.eqPresets, 'eqPresets') as EqPreset[],
+    tracks: keyedArr<TrackData>(raw.tracks, 'tracks'),
     deletions: normalizeDeletions(raw.deletions),
   };
 }

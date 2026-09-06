@@ -39,24 +39,17 @@ export const syncConfigItem = storage.defineItem<SyncConfig>('local:syncConfig',
   fallback: DEFAULT_SYNC_CONFIG,
 });
 
-/** Reads the record, migrating one written by the server-era builds (which
- * carried `syncId`/`consentedId` and hashes over a different shape): the
- * on/off choice is kept, the bookkeeping starts over so the first reconcile
- * merges rather than trusting stale hashes. */
+/** The stored record over the defaults, known fields only. A record from the
+ * server-era builds (`syncId`, hashes over another shape) needs no more than
+ * that: its leftovers are dropped here and gone on the next write, and the
+ * hashes it lacks read as null, which sends the first reconcile down the
+ * merge path rather than trusting anything stale. */
 export async function loadSyncConfig(): Promise<SyncConfig> {
-  const raw = (await syncConfigItem.getValue()) as Partial<SyncConfig> & {
-    syncId?: unknown;
-    consentedId?: unknown;
-    lastSyncedHash?: unknown;
-  };
-  const legacy = 'syncId' in raw || 'consentedId' in raw || 'lastSyncedHash' in raw;
-  if (!legacy) return { ...DEFAULT_SYNC_CONFIG, ...raw };
-  const config: SyncConfig = {
-    ...DEFAULT_SYNC_CONFIG,
-    enabled: raw.enabled ?? true,
-    lastChangedAt: raw.lastChangedAt ?? 0,
-    pendingPush: true,
-  };
-  await syncConfigItem.setValue(config);
-  return config;
+  const raw = (await syncConfigItem.getValue()) as Partial<SyncConfig>;
+  const config: Record<string, unknown> = { ...DEFAULT_SYNC_CONFIG };
+  for (const key of Object.keys(DEFAULT_SYNC_CONFIG)) {
+    const value = raw[key as keyof SyncConfig];
+    if (value !== undefined) config[key] = value;
+  }
+  return config as unknown as SyncConfig;
 }
