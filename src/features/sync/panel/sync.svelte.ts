@@ -163,11 +163,14 @@ class SyncStore {
     }, SAFETY_INTERVAL_MS);
   }
 
-  /** User chose the synced copy: apply it over this device's data. */
+  /** User chose the synced copy: apply it over this device's data — even if
+   * this device was edited after that copy was written (the prompt may have
+   * sat open a while), which the ordinary last-write-wins rule would read as
+   * "push ours" instead. */
   async acceptRemote(): Promise<void> {
     this.needsConsent = false;
     await this.#saveConfig({ consented: true });
-    await this.#enqueue(() => this.#reconcile({ allowApply: true }));
+    await this.#enqueue(() => this.#reconcile({ allowApply: true, forceApply: true }));
   }
 
   /** User chose this device's data: keep it and let it win the next push. */
@@ -316,8 +319,9 @@ class SyncStore {
     );
   }
 
-  /** Read-and-decide: push, apply remote, or nothing — last write wins. */
-  async #reconcile(opts: { allowApply: boolean; repairTorn?: boolean }) {
+  /** Read-and-decide: push, apply remote, or nothing — last write wins,
+   * unless `forceApply` says the user already decided for the remote. */
+  async #reconcile(opts: { allowApply: boolean; forceApply?: boolean; repairTorn?: boolean }) {
     if (!this.#config.enabled) return;
     this.#syncing = true;
     try {
@@ -378,7 +382,8 @@ class SyncStore {
       }
       // Another device wrote since our last sync. Compare what we *would*
       // push, not the raw local data — trimming and rounding are lossy.
-      const wouldApply = !localChanged || remote.exportedAt > this.#config.lastChangedAt;
+      const wouldApply =
+        opts.forceApply || !localChanged || remote.exportedAt > this.#config.lastChangedAt;
       let fitted: Fitted<EncodedBlob> | undefined;
       try {
         fitted = await this.#fit(local);
