@@ -51,7 +51,8 @@ KEEPING YOUR PLACE
 • Markers, loops, snippets and effect settings are saved per track against the
   page URL, so reopening a video brings your practice setup back with it.
 • Favourites and recently practised tracks live in a library tab.
-• Optional cross-device sync copies that setup to your other browsers.
+• Optional cross-device sync copies that setup to your other browsers through
+  the browser's own sync — no server, no account.
 
 
 HOW IT CONNECTS
@@ -73,10 +74,10 @@ PRIVACY
 • No telemetry. No analytics. No ads. No accounts. Nothing is sold or shared.
 • Audio never leaves your device. Every effect — pitch, speed, vocal reduction,
   EQ, chord detection — runs locally in your browser.
-• Cross-device sync is the only network request the extension ever makes. It is
-  on by default and can be switched off in Settings, and it carries no audio:
-  just your settings, markers, loops, snippets, and the page URLs and titles of
-  the tracks in your library.
+• The extension makes no network requests of its own. Cross-device sync uses
+  your browser's own sync storage — no server of ours — is on by default,
+  switches off in Settings, and carries no audio: just your settings, markers,
+  loops, snippets, and the page URLs and titles of the tracks in your library.
 • Full policy: https://github.com/patrickiel/note-by-note/blob/main/PRIVACY.md
 
 

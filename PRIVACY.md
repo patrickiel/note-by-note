@@ -1,6 +1,6 @@
 # Privacy Policy — Note by Note
 
-**Last updated:** 28 July 2026
+**Last updated:** 5 September 2026
 **Operator:** Patrick Demichiel ([github.com/patrickiel/note-by-note](https://github.com/patrickiel/note-by-note))
 
 Note by Note is a browser extension for practising music along with audio and
@@ -30,19 +30,26 @@ computer:
 Uninstalling the extension removes all of it. `Settings → Reset Settings` clears
 it without uninstalling.
 
-## What is transmitted, and when
+## What leaves your device, and when
 
-The extension makes exactly one kind of network request: the optional
-**cross-device sync** backup. Nothing else in the extension talks to the network.
+The extension makes **no network requests of its own**. The one way data can
+leave your device is the optional **cross-device sync**, which uses the
+browser's own extension sync storage (`storage.sync`): the extension writes a
+snapshot there, and the browser — not the extension — carries it to your other
+devices signed in to the same browser profile.
 
-Sync is **on by default**, but it only starts transmitting once you have
-something to sync. When it does, it uploads a single snapshot containing:
+Sync is **on by default**. When there is something to sync, the snapshot
+contains:
 
 - your settings and UI preferences
 - your EQ presets
 - your **Recent** and **Favorites** lists — including the **page URL and title**
   of tracks you practised
 - your per-track data — markers and labels, loop ranges, snippets, chord charts
+
+The snapshot is compressed and, when it would not fit the browser's sync quota,
+trimmed by priority (chord charts and older Recent entries are left out first).
+Nothing is deleted from your device by trimming.
 
 Because that snapshot contains the addresses of pages you have visited, the
 Firefox listing declares the `browsingActivity` data-collection category.
@@ -52,37 +59,35 @@ tracks you practised on, or anything identifying you personally.
 
 ### Where it goes
 
-Snapshots are stored by a Cloudflare Worker with Cloudflare KV, at
-`https://note-by-note-sync.oapp.workers.dev`, operated by the author. The server
-source is in [`server/`](server/) and can be self-hosted — self-hosters change
-one constant and rebuild.
+Your browser vendor's sync service — Google for Chrome, Mozilla for Firefox, or
+the vendor of a Chromium-based browser such as Edge or Brave — stores and
+transports it under its own terms and privacy policy. The author operates no
+server and cannot see the data.
 
-- There are no accounts. A random 43-character **sync ID** is the only
-  credential; it *is* the capability, so treat it like a password.
-- The ID travels in an `X-Sync-Id` header, never in the URL, so it does not land
-  in request logs. KV is keyed by its SHA-256, so the raw ID is not stored either.
-- Snapshots are stored **unencrypted**. Whoever operates the server can read
-  them. Run your own if that matters to you.
-- Snapshots expire after **180 days**, refreshed on every write.
-- IP addresses are visible to Cloudflare as part of serving and rate-limiting
-  requests, per Cloudflare's own data handling. They are not stored by the
-  Worker or linked to a snapshot.
+- If you are not signed in to browser sync, the data never leaves the device.
+- Firefox Sync is end-to-end encrypted. Chrome sync data is encrypted at rest
+  by Google, and end-to-end only if you set a sync passphrase.
+- There are no accounts with the extension and no sync ID.
 
 ### Turning it off and deleting the data
 
-- `Settings → Sync` turns sync off. No further data is transmitted.
-- `Settings → Sync → Delete synced data` removes the server-side copy.
-- Doing nothing also works: an unused snapshot expires after 180 days.
+- `Settings → Sync` turns sync off. Nothing further is written to the browser's
+  sync storage.
+- `Settings → Sync → Delete synced data` clears the synced copy and turns sync
+  off on that device. Another device with sync still on will upload its copy
+  again, so turn it off there first if you want it gone.
+- Uninstalling the extension removes the synced copy from the browser's sync
+  storage on every device.
 
 ## Permissions and why
 
 | Permission | Why |
 | --- | --- |
-| `storage` | Saves your markers, loops, snippets and settings on your device. |
+| `storage` | Saves your markers, loops, snippets and settings on your device, and — with sync on — a copy in the browser's sync storage. |
 | `activeTab`, `scripting` | Injects the audio engine into the tab when you press **Connect**. |
 | `tabs` | Reads the active tab's URL and title to look up the practice data you saved for that track. |
 | `tabCapture`, `offscreen` (Chrome only) | Fallback audio path for pages that block the audio worklet. |
-| `cookies` + access to the sync server's domain (optional) | Keeps a copy of your sync ID as a cookie on the sync server's domain, the one place the browser does not wipe when the extension is uninstalled — so a reinstall gets your data back. Access to that domain is requested from `Settings → Sync` (or comes with **Connect**), never at install time. The cookie is read only through the extension API and never sent with a request (the sync ID travels in a header). No other site's cookies are touched; `Delete synced data` removes it. |
+| `identity` (Chrome only) | Asks the browser one yes/no question — is this profile signed in with sync on? — so `Settings → Sync` can warn when other devices won't be reached. No email, name or account details are read, and nothing is sent anywhere. |
 | Access to all sites (optional) | Requested **only** when you first press **Connect**, never at install time, because you choose which sites to practise on. `Settings → Revoke Permissions` takes it back. |
 
 ## Children

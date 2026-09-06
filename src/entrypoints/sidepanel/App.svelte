@@ -17,6 +17,7 @@
   import { trackSync } from '@/core/state/track-sync.svelte';
   import { view } from '@/core/state/view.svelte';
   import { sync } from '@/features/sync/panel/sync.svelte';
+  import { pruneEmptyTrackData } from '@/core/persist/storage';
 
   const params = new URLSearchParams(location.search);
   const mock = params.has('mock');
@@ -44,8 +45,12 @@
         };
       }
       installShortcuts();
-      // Fire-and-forget: opening the panel must not wait on the network.
-      void sync.init();
+      // Fire-and-forget: opening the panel must not wait on sync. The sweep of
+      // empty track records (left by earlier builds) goes first so its removals
+      // are already history when the sync store starts watching local storage.
+      void pruneEmptyTrackData()
+        .catch(() => {})
+        .then(() => sync.init());
       if (mock) {
         installMockState();
         if (mockPlay) installMockTicker();

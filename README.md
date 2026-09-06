@@ -50,8 +50,8 @@ draws a chart under the timeline.
 **Keeping your place.** Settings are stored per track against a normalized URL,
 so reopening a video brings back its pitch, speed, markers, loops and snippets —
 however you open it, not just from the library. Favorites and
-recents live in a library tab, and optional cross-device sync pushes a snapshot
-to a small Cloudflare Worker.
+recents live in a library tab, and optional cross-device sync rides the
+browser's own extension sync — no server.
 
 ## Installing it
 
@@ -166,36 +166,35 @@ the other way round.
   are in marker chips, loop/sequence bounds, the tab-capture CTA and the
   vocal-reducer control — known and pre-existing.
 
-## Sync server
+## Sync
 
-`server/` is a separate pnpm workspace (its own lockfile and tsconfig): a
-Cloudflare Worker plus KV storing one backup snapshot per sync ID, last write
-wins. There are no accounts. The 43-character sync ID *is* the credential, so
-treat it like a password. Deploy notes in [server/README.md](server/README.md).
+Sync uses the browser's own extension sync storage: whatever Chrome or Firefox
+already syncs for the profile you are signed in to. There is no server, no
+account and no ID — turn it on in two browsers signed in to the same profile
+and they meet in the middle. Nothing in the extension talks to the network
+itself; the browser vendor's sync service carries the data under its own terms
+(Firefox Sync is end-to-end encrypted; Chrome sync data is end-to-end encrypted
+only if you set a sync passphrase). Not signed in? It stays on the device.
 
-The ID travels in an `X-Sync-Id` header rather than the URL, because URLs are
-recorded verbatim by request logs, and KV is keyed by its SHA-256 so the raw
-token isn't stored either. Writes are rate-limited per IP and snapshots carry a
-180-day TTL, refreshed on every write.
+What travels: settings, UI preferences, EQ presets, Recent and Favorites (page
+URL, title, duration, thumbnail URL) and per-track data — markers with their
+labels, loop ranges, snippets and chord charts. **No audio, ever.** There is no
+telemetry and no analytics.
 
-A snapshot is your settings, UI preferences, EQ presets, Recent and Favorites
-(page URL, title, duration, thumbnail URL) and per-track data (markers with your
-labels, loop ranges, snippets, chord charts). **No audio, ever.** It is stored
-unencrypted, so whoever operates the Worker can read it — run your own if that
-matters to you. Sync is on by default but only mints an ID once you have
-something to sync; `Settings → Sync → Delete synced data` removes the server
-copy. Nothing else in the extension talks to the network: there is no telemetry
-and no analytics.
+That storage is small (100 KB), so the snapshot is gzipped and, when it still
+doesn't fit, trimmed by priority: settings, presets, Favorites and their
+markers and snippets always go; then Recent, newest first; then other tracks
+with markers or snippets; chord charts last, favorites first. Nothing is
+deleted on the device it was trimmed from, and another device simply
+re-analyzes a chart that didn't fit. `Settings → Sync` says when something was
+left out. The mechanics — the compact chart encoding, the chunked blob, the
+trimming order — are in [src/features/sync/persist/](src/features/sync/persist/).
 
-The ID lives in the browser's synced extension storage, so a second device on
-the same profile picks it up by itself. The browser wipes that storage (on
-every device) when the extension is uninstalled, so the ID can also be kept as
-a cookie on the sync server's domain, which outlives the extension — that is
-what the `cookies` permission and the optional access to that one domain are
-for (`Settings → Sync → Keep the ID after a reinstall`; the **Connect** grant
-covers it too). How and why, and what it does not survive, is documented in
-[id-cookie.ts](src/features/sync/panel/id-cookie.ts). Self-hosters change the
-URL in [sync-hosts.ts](src/features/sync/sync-hosts.ts) and rebuild.
+Last write wins. A device that already holds data of its own is asked before
+the synced copy replaces it. Uninstalling wipes the synced copy on every
+device, but any device still running uploads its own again within seconds;
+`Settings → Sync → Delete synced data` clears it and turns sync off on that
+device. `Settings → Export` is the offline backup.
 
 ## License
 

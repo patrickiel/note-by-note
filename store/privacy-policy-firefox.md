@@ -15,11 +15,11 @@ Everything the extension remembers is kept in browser extension storage on your 
 
 Uninstalling the extension removes all of it. Settings → Reset Settings clears it without uninstalling.
 
-**What is transmitted, and when**
+**What leaves your device, and when**
 
-The extension makes exactly one kind of network request: the optional cross-device sync backup. Nothing else in the extension talks to the network.
+The extension makes no network requests of its own. The one way data can leave your device is the optional cross-device sync, which uses Firefox's own extension sync storage (`storage.sync`): the extension writes a snapshot there, and Firefox Sync — not the extension — carries it to your other devices signed in to the same Firefox account.
 
-Sync is on by default, but it only starts transmitting once you have something to sync. When it does, it uploads a single snapshot containing your settings and UI preferences, your EQ presets, your Recent and Favorites lists — including the page URL and title of tracks you practised — and your per-track data (markers and labels, loop ranges, snippets, chord charts).
+Sync is on by default. When there is something to sync, the snapshot contains your settings and UI preferences, your EQ presets, your Recent and Favorites lists — including the page URL and title of tracks you practised — and your per-track data (markers and labels, loop ranges, snippets, chord charts). It is compressed and, when it would not fit the sync quota, trimmed by priority; nothing is deleted from your device by trimming.
 
 Because that snapshot contains the addresses of pages you have visited, this listing declares the `browsingActivity` data-collection category.
 
@@ -27,23 +27,20 @@ Not included: audio, page content, keystrokes, browsing history beyond the track
 
 **Where it goes**
 
-Snapshots are stored by a Cloudflare Worker with Cloudflare KV, at `https://note-by-note-sync.oapp.workers.dev`, operated by the author. The server source is in the repository and can be self-hosted — self-hosters change one URL (`src/features/sync/sync-hosts.ts`) and rebuild.
+Mozilla's Firefox Sync service stores and transports it under Mozilla's own terms and privacy policy. Firefox Sync is end-to-end encrypted. The author operates no server and cannot see the data.
 
-- There are no accounts. A random 43-character sync ID is the only credential; it *is* the capability, so treat it like a password.
-- The ID travels in an `X-Sync-Id` header, never in the URL, so it does not land in request logs. KV is keyed by its SHA-256, so the raw ID is not stored either.
-- Snapshots are stored **unencrypted**. Whoever operates the server can read them. Run your own if that matters to you.
-- Snapshots expire after 180 days, refreshed on every write.
-- IP addresses are visible to Cloudflare as part of serving and rate-limiting requests, per Cloudflare's own data handling. They are not stored by the Worker or linked to a snapshot.
+- If you are not signed in to Firefox Sync, the data never leaves the device.
+- There are no accounts with the extension and no sync ID.
 
 **Turning it off and deleting the data**
 
-- Settings → Sync turns sync off. No further data is transmitted.
-- Settings → Sync → Delete synced data removes the server-side copy.
-- Doing nothing also works: an unused snapshot expires after 180 days.
+- Settings → Sync turns sync off. Nothing further is written to sync storage.
+- Settings → Sync → Delete synced data clears the synced copy and turns sync off on that device. Another device with sync still on will upload its copy again, so turn it off there first if you want it gone.
+- Uninstalling the extension removes the synced copy on every device.
 
 **Permissions and why**
 
-- `storage` — saves your markers, loops, snippets and settings on your device.
+- `storage` — saves your markers, loops, snippets and settings on your device, and — with sync on — a copy in Firefox's sync storage.
 - `activeTab`, `scripting` — injects the audio engine into the tab when you press Connect.
 - `tabs` — reads the active tab's URL and title to look up the practice data you saved for that track.
 - Access to all sites (optional) — requested **only** when you first press Connect, never at install time, because you choose which sites to practise on. Settings → Revoke Permissions takes it back.
@@ -60,4 +57,4 @@ Material changes to this policy will be recorded in the repository's commit hist
 
 Questions or requests: open an issue at [github.com/patrickiel/note-by-note/issues](https://github.com/patrickiel/note-by-note/issues).
 
-Last updated: 28 July 2026. Operator: Patrick Demichiel.
+Last updated: 5 September 2026. Operator: Patrick Demichiel.

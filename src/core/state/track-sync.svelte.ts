@@ -4,7 +4,8 @@ import type { EffectParams, HistoryEntry, MediaInfo, TrackData, TrackIdentity } 
 import { touchFavorite } from '../../features/library/persist/favorites';
 import { removeHistoryEntry, upsertHistory } from '../../features/library/persist/history';
 import { findSavedEntry } from '../../features/library/panel/saved-settings';
-import { loadTrackData, saveTrackData } from '../persist/storage';
+import { loadTrackData, removeTrackData, saveTrackData } from '../persist/storage';
+import { hasContent } from '../model/track-content';
 import { openTabWithPanel } from '../side-panel';
 import { trackDataDescriptors } from '../persist/track-data';
 import { session } from './session.svelte';
@@ -233,7 +234,12 @@ class TrackSync {
       updatedAt: Date.now(),
     };
     for (const d of trackDataDescriptors) d.collect(data);
-    void saveTrackData(data);
+    // A record that holds nothing but flags is removed rather than written:
+    // opening a track must not leave a row behind, and deleting the last
+    // marker takes the row with it. The flags (sequence loop/count-in, the
+    // chords switch) mean nothing without snippets or a chart.
+    if (hasContent(data)) void saveTrackData(data);
+    else void removeTrackData(data.identity.key);
   }
 
   /** A row in the Songs list was clicked: go there. Its settings need no staging

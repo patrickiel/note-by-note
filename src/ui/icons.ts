@@ -56,6 +56,7 @@ import SkipBack from '@lucide/svelte/icons/skip-back';
 import Star from '@lucide/svelte/icons/star';
 import Sun from '@lucide/svelte/icons/sun';
 import Trash2 from '@lucide/svelte/icons/trash-2';
+import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 import Upload from '@lucide/svelte/icons/upload';
 import Volume2 from '@lucide/svelte/icons/volume-2';
 import VolumeX from '@lucide/svelte/icons/volume-x';
@@ -124,6 +125,7 @@ export const ICONS = {
   clearAll: ListX,
   restore: RotateCcw,
   shield: Shield,
+  alert: TriangleAlert,
   download: Download,
   upload: Upload,
   grid: Grid3x3,

@@ -44,7 +44,8 @@ review (a few days; `<all_urls>` + tab capture can stretch it).
 
 Only revisit the **Privacy practices** tab if permissions or data use changed —
 keep it consistent with the manifest's `data_collection_permissions`
-(*browsing activity*: sync uploads Recent/Favorites, which carry URLs/titles).
+(*browsing activity*: sync writes Recent/Favorites, which carry URLs/titles, to
+the browser's sync storage).
 
 ## 3 — Firefox Add-ons (AMO)
 

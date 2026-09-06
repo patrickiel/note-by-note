@@ -187,23 +187,13 @@
 
   let syncBusy = $state(false);
   let syncNotice = $state<{ ok: boolean; text: string } | null>(null);
-  let connectId = $state('');
-  let idCopied = $state(false);
 
   async function setSyncEnabled(on: boolean) {
-    if (on && sync.syncId && !sync.lastSyncedAt) {
-      // An ID this device never synced with — inherited from another device
-      // through browser sync. Joining is pull-first, same as Connect.
-      const ok = confirm(
-        'A sync ID from your other device was found. Replace all data on this ' +
-          "device with the synced copy? If the ID has no data yet, this device's " +
-          'data is uploaded instead.',
-      );
-      if (!ok) return;
-    }
     syncBusy = true;
     syncNotice = null;
     try {
+      // Enabling meets whatever is in the browser's sync area; if this device
+      // has data of its own to lose, the store raises the consent block below.
       if (on) await sync.enable();
       else await sync.disable();
     } finally {
@@ -211,7 +201,7 @@
     }
   }
 
-  /** An ID arrived from another device while this one already held data. */
+  /** A snapshot from another device was found while this one already held data. */
   async function resolveConsent(accept: boolean) {
     syncBusy = true;
     syncNotice = null;
@@ -226,58 +216,18 @@
 
   async function deleteSyncedData() {
     const ok = confirm(
-      'Delete the synced copy of your data from the server? Sync will be turned ' +
-        'off. Data on this device is not affected.',
+      "Delete the synced copy from this browser's sync storage? Sync is turned " +
+        'off on this device. Other devices with sync on will upload their copy ' +
+        'again — turn it off there first if you want it gone.',
     );
     if (!ok) return;
     syncBusy = true;
     syncNotice = null;
     try {
       await sync.deleteRemote();
-      syncNotice = { ok: true, text: 'Synced data deleted from the server.' };
+      syncNotice = { ok: true, text: "Synced copy deleted from the browser's sync storage." };
     } catch (err) {
       syncNotice = { ok: false, text: `Delete failed: ${message(err)}` };
-    } finally {
-      syncBusy = false;
-    }
-  }
-
-  async function keepAfterReinstall() {
-    syncNotice = null;
-    if (!(await sync.keepAfterReinstall())) {
-      syncNotice = { ok: false, text: 'Permission not granted — the ID is not kept after a reinstall.' };
-    }
-  }
-
-  async function copySyncId() {
-    if (!sync.syncId) return;
-    await navigator.clipboard.writeText(sync.syncId);
-    idCopied = true;
-    setTimeout(() => (idCopied = false), 1500);
-  }
-
-  async function connectSync() {
-    const id = connectId.trim();
-    if (!id) return;
-    const ok = confirm(
-      'Replace all data on this device with the synced copy? ' +
-        "If the ID has no data yet, this device's data is uploaded instead.",
-    );
-    if (!ok) return;
-    syncBusy = true;
-    syncNotice = null;
-    try {
-      // The 'applied' path never returns here — it reloads the panel.
-      const result = await sync.connectWithId(id);
-      if (result === 'uploaded') {
-        connectId = '';
-        syncNotice = {
-          ok: true,
-          text: "No synced data found for that ID — this device's data was uploaded.",
-        };
-      }
-    } catch (err) {
-      syncNotice = { ok: false, text: `Connect failed: ${message(err)}` };
     } finally {
       syncBusy = false;
     }
@@ -559,7 +509,7 @@
       <div class="flex items-center gap-3 py-2.5 px-3">
         {@render prefText(
           'Sync between devices',
-          'Keep your settings, songs, presets, markers and snippets the same everywhere. No account needed — devices are linked by a private ID.',
+          "Keep your songs, settings, markers and snippets the same on all your devices. Uses your browser's built-in sync.",
         )}
         <!-- Function binding: enabling can be declined in a confirm, so the
              knob must follow the store instead of flipping optimistically. -->
@@ -568,10 +518,21 @@
           label="Sync between devices"
         />
       </div>
+      {#if sync.enabled && sync.linked === false}
+        <!-- Chromium can tell; on Firefox `linked` stays null and the toggle
+             copy has to carry the condition on its own. -->
+        <div class="flex items-start gap-2 py-2.5 px-3 border-t border-line text-[12px] text-danger">
+          <span class="flex-none flex mt-px"><Icon name="alert" size={14} /></span>
+          <span>
+            Not syncing yet: sign in to your browser and turn on sync. Your data
+            stays saved here in the meantime.
+          </span>
+        </div>
+      {/if}
       {#if sync.needsConsent}
         <div class="flex flex-col items-start gap-2 py-2.5 px-3 border-t border-line">
           {@render prefText(
-            'A sync ID from your other device was found',
+            'Synced data from your other device was found',
             'This device already has data of its own, so nothing has been changed yet. Use the synced copy and replace what is here, or keep this device and upload it instead.',
           )}
           <div class="flex items-center gap-1">
@@ -596,47 +557,7 @@
           </div>
         </div>
       {/if}
-      {#if sync.enabled && sync.syncId}
-        <div class="flex flex-col items-start gap-2 py-2.5 px-3 border-t border-line">
-          {@render prefText(
-            'Your sync ID',
-            'Devices signed into the same browser profile pick this ID up automatically; elsewhere, enter it by hand. Keep it private — anyone who has it can read and change your data.',
-          )}
-          <div class="flex items-center gap-2 w-full">
-            <code
-              class="flex-1 min-w-0 py-1.5 px-2 text-[11px] break-all select-all text-fg bg-hover border border-line rounded-sm"
-              >{sync.syncId}</code
-            >
-            <button
-              type="button"
-              class="flex-none py-1 px-2 text-[13px] font-bold text-accent-ink rounded-sm hover:not-disabled:bg-accent-soft disabled:opacity-40 disabled:cursor-default"
-              onclick={copySyncId}
-              {@attach tooltip('Copy sync ID')}
-            >
-              {idCopied ? 'Copied' : 'Copy'}
-            </button>
-          </div>
-        </div>
-        <div class="flex items-center gap-3 py-2.5 px-3 border-t border-line">
-          <!-- Copy defers to id-cookie.ts; only what the user acts on is stated. -->
-          {@render prefText(
-            'Keep the ID after a reinstall',
-            sync.durable
-              ? 'On. A copy is kept in this browser profile, outside the extension — but not past clearing the browser’s cookies, so keep a copy for that.'
-              : 'Uninstalling wipes the ID from the extension. Allow access to the sync server’s domain to keep a copy in this browser profile instead — nothing else is accessed.',
-          )}
-          {#if !sync.durable}
-            <button
-              type="button"
-              class="flex-none py-1 px-2 text-[13px] font-bold text-accent-ink rounded-sm hover:not-disabled:bg-accent-soft disabled:opacity-40 disabled:cursor-default"
-              disabled={syncBusy}
-              onclick={() => void keepAfterReinstall()}
-              {@attach tooltip('Allow the extension to keep the ID on the sync server’s domain')}
-            >
-              Allow
-            </button>
-          {/if}
-        </div>
+      {#if sync.enabled}
         <div class="flex items-center gap-3 py-2.5 px-3 border-t border-line">
           <span
             class={[
@@ -648,8 +569,10 @@
               Syncing…
             {:else if sync.status === 'error'}
               {sync.lastError}
+            {:else if sync.lastSyncedAt}
+              Saved {lastSynced(sync.lastSyncedAt)}{#if sync.usedBytes > 0}{' · '}{sync.usedPercent}% of 100 KB{/if}
             {:else}
-              Last synced {lastSynced(sync.lastSyncedAt)}
+              Nothing saved yet
             {/if}
           </span>
           <button
@@ -662,60 +585,25 @@
             Sync now
           </button>
         </div>
+        {#if sync.trimmed}
+          <div class="text-[12px] text-muted py-2.5 px-3 border-t border-line">
+            Some chord charts or older songs didn't fit and stay on this device only.
+          </div>
+        {/if}
         <div class="flex items-center gap-3 py-2.5 px-3 border-t border-line">
           {@render prefText(
             'Delete synced data',
-            'Removes the copy stored on the sync server and turns sync off. Data on this device is kept.',
+            'Removes the synced copy and turns sync off on this device. Nothing on this device is deleted.',
           )}
           <button
             type="button"
             class="flex-none py-1 px-2 text-[13px] font-bold text-accent-ink rounded-sm hover:not-disabled:bg-accent-soft disabled:opacity-40 disabled:cursor-default"
             disabled={syncBusy || sync.status === 'syncing'}
             onclick={() => void deleteSyncedData()}
-            {@attach tooltip('Delete the synced copy from the server')}
+            {@attach tooltip("Delete the synced copy from the browser's sync storage")}
           >
             Delete
           </button>
-        </div>
-      {:else}
-        {#if sync.syncId}
-          <div class="text-[12px] text-muted py-2.5 px-3 border-t border-line">
-            {sync.lastSyncedAt
-              ? 'Sync is off. Turn it back on to keep using your existing sync ID.'
-              : 'A sync ID from your other device was found — turn on sync to use it.'}
-          </div>
-        {:else if sync.enabled}
-          <div class="text-[12px] text-muted py-2.5 px-3 border-t border-line">
-            Sync is on. Your private ID is created as soon as there is something to
-            sync — a song in Recent, a marker, an EQ preset. On a new device, the ID
-            from your other devices arrives through browser sync within a minute or so;
-            if it doesn't, paste it below.
-          </div>
-        {/if}
-        <div class="flex flex-col items-start gap-2 py-2.5 px-3 border-t border-line">
-          {@render prefText(
-            'Connect with a sync ID',
-            'Paste the ID from your other device. Its synced data replaces what is on this device.',
-          )}
-          <div class="flex items-center gap-2 w-full">
-            <input
-              class="flex-1 min-w-0 py-1.5 px-2 font-[monospace] text-[11px] text-fg bg-base border border-line rounded-sm"
-              type="text"
-              placeholder="Sync ID"
-              spellcheck="false"
-              autocomplete="off"
-              bind:value={connectId}
-            />
-            <button
-              type="button"
-              class="flex-none py-1 px-2 text-[13px] font-bold text-accent-ink rounded-sm hover:not-disabled:bg-accent-soft disabled:opacity-40 disabled:cursor-default"
-              disabled={syncBusy || !connectId.trim()}
-              onclick={() => void connectSync()}
-              {@attach tooltip('Connect with sync ID')}
-            >
-              Connect
-            </button>
-          </div>
         </div>
       {/if}
       {#if syncNotice}

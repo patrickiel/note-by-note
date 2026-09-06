@@ -1,5 +1,6 @@
 import { storage, type StorageItemKey, type WxtStorageItem } from '#imports';
 import { DEFAULT_SETTINGS, DEFAULT_UI_PREFS } from '../model/defaults';
+import { hasContent } from '../model/track-content';
 import type {
   EqPreset,
   FavoriteEntry,
@@ -89,8 +90,44 @@ export async function saveTrackData(data: TrackData): Promise<void> {
   await storage.setItem(trackDataKey(data.identity.key), toPlain(data));
 }
 
+export async function removeTrackData(key: string): Promise<void> {
+  await storage.removeItem(trackDataKey(key));
+}
+
+/** Raw `browser.storage` keys carry no `local:` prefix — see `trackDataKey`. */
+const RAW_TRACK_PREFIX = 'track:';
+
+export async function loadAllTrackData(): Promise<TrackData[]> {
+  const snapshot = await browser.storage.local.get(null);
+  return Object.entries(snapshot)
+    .filter(([key]) => key.startsWith(RAW_TRACK_PREFIX))
+    .map(([, value]) => value as TrackData);
+}
+
+/** One write for many records (a sync apply), instead of one per track. */
+export async function saveAllTrackData(list: TrackData[]): Promise<void> {
+  if (!list.length) return;
+  const items: Record<string, TrackData> = {};
+  for (const data of list) items[`${RAW_TRACK_PREFIX}${data.identity.key}`] = toPlain(data);
+  await browser.storage.local.set(items);
+}
+
 export async function removeAllTrackData(): Promise<void> {
   const snapshot = await browser.storage.local.get(null);
-  const keys = Object.keys(snapshot).filter((k) => k.startsWith('track:'));
+  const keys = Object.keys(snapshot).filter((k) => k.startsWith(RAW_TRACK_PREFIX));
   if (keys.length) await browser.storage.local.remove(keys);
+}
+
+/** Drops records with nothing in them but flags (no markers, no snippets, no
+ * chart) — earlier builds wrote one whenever a track was merely opened, and
+ * each would otherwise sit in storage forever. Returns how many. */
+export async function pruneEmptyTrackData(): Promise<number> {
+  const snapshot = await browser.storage.local.get(null);
+  const keys = Object.entries(snapshot)
+    .filter(
+      ([key, value]) => key.startsWith(RAW_TRACK_PREFIX) && !hasContent(value as TrackData),
+    )
+    .map(([key]) => key);
+  if (keys.length) await browser.storage.local.remove(keys);
+  return keys.length;
 }

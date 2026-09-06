@@ -2,7 +2,6 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'wxt';
-import { SYNC_ENDPOINT_PROD, SYNC_HOST_PATTERNS, syncHostPattern } from './src/features/sync/sync-hosts';
 
 // Persistent dev profile: extensions installed here (e.g. uBlock Origin
 // Lite for YouTube-breakage repros), logins, and site data survive between
@@ -104,14 +103,14 @@ export default defineConfig({
               // `data_collection_permissions` only in 140 — which is also the
               // current ESR line, so nothing supported is left behind.
               strict_min_version: '140.0',
-              // Sync ships Recent/Favorites off the device, and those carry the
-              // page URL, title and thumbnail of every track practised — AMO
-              // counts that as browsing activity. `required` rather than
-              // `optional` because sync is on out of the box
-              // (DEFAULT_SYNC_CONFIG.enabled), and a manifest claim that
-              // contradicts the submission form is a rejection. Nothing else is
-              // declared: no audio, no page content, no telemetry. See
-              // PRIVACY.md for the full list.
+              // Recent/Favorites carry the page URL, title and thumbnail of
+              // every track practised, and with sync on (the default —
+              // DEFAULT_SYNC_CONFIG.enabled) they leave the device through
+              // Firefox Sync's extension storage. AMO counts that as browsing
+              // activity; `required` rather than `optional` so the manifest
+              // matches the submission form (a contradiction is a rejection).
+              // Nothing else is declared: no audio, no page content, no
+              // telemetry, and no server of ours. See PRIVACY.md.
               data_collection_permissions: { required: ['browsingActivity'] },
             },
             // Firefox for Android has no sidebar, so this is a floor rather
@@ -122,26 +121,21 @@ export default defineConfig({
         }
       : { minimum_chrome_version: '116' }),
     // `sidePanel` is added by WXT itself from the sidepanel entrypoint (Firefox
-    // gets `sidebar_action`, which needs no permission). `tabCapture` and
-    // `offscreen` are Chromium-only APIs — see src/core/platform.ts, which gates
-    // every caller on the same build target.
+    // gets `sidebar_action`, which needs no permission). `tabCapture`,
+    // `offscreen` and `identity` are Chromium-only APIs — see
+    // src/core/platform.ts, which gates every caller on the same build target.
+    // `identity` (without `identity.email`) shows no install warning and is
+    // used only to ask whether the profile's sync is on, so the Sync settings
+    // can say when other devices won't be reached.
     permissions: [
       'storage',
-      'cookies',
       'activeTab',
       'scripting',
       'tabs',
-      ...(browser === 'firefox' ? [] : ['tabCapture', 'offscreen']),
+      ...(browser === 'firefox' ? [] : ['tabCapture', 'offscreen', 'identity']),
     ],
-    // `<all_urls>` is what Connect asks for. The sync host is what the ID
-    // cookie needs (see src/features/sync/panel/id-cookie.ts) — requested from
-    // the Sync settings, and covered by `<all_urls>` too once that is granted.
-    // Non-production builds also list the localhost Worker so `pnpm dev` can
-    // exercise the cookie path.
-    optional_host_permissions: [
-      '<all_urls>',
-      ...(mode === 'production' ? [syncHostPattern(SYNC_ENDPOINT_PROD)] : SYNC_HOST_PATTERNS),
-    ],
+    // What Connect asks for, in a user gesture — never at install time.
+    optional_host_permissions: ['<all_urls>'],
     action: {
       default_title: 'Note by Note',
     },
