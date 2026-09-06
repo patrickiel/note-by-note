@@ -69,26 +69,38 @@ export function parseBackup(text: string): Backup {
  * not carry — a restore reproduces the machine it came from rather than
  * merging into whatever is here. Host permissions are left untouched.
  *
- * What the restore drops is dated as deleted (see `deletions.ts`), so sync
- * removes it on other devices too instead of keeping their copies and
- * bringing them back here. The file's own records come along; this device's
- * old ones do not — the file may carry items they would contradict.
+ * To sync, a restore is an edit made here, now: every restored track record
+ * and Recent row is stamped with the current time so it outranks a peer's
+ * copy (and any peer deletion record) in the merge — otherwise restoring an
+ * older file would be undone by the next sync. Recent keeps the file's order
+ * through a millisecond stagger. What the restore drops is dated as deleted
+ * (see `deletions.ts`), so peers remove it too instead of keeping their
+ * copies and bringing them back here. The file's own deletion records come
+ * along; this device's old ones do not — the file may carry items they would
+ * contradict.
  */
 export async function restoreBackup(backup: Backup): Promise<void> {
-  const [tracks, history] = await Promise.all([loadAllTrackData(), historyItem.getValue()]);
+  const [oldTracks, oldHistory] = await Promise.all([loadAllTrackData(), historyItem.getValue()]);
   const now = Date.now();
-  const kept = new Set([...backup.tracks, ...backup.history].map((e) => e.identity.key));
+  const tracks = backup.tracks.map((t) => ({ ...t, updatedAt: now }));
+  const history = backup.history.map((h, i) => ({ ...h, updatedAt: now - i }));
+  const keptTracks = new Set(tracks.map((t) => t.identity.key));
+  const keptHistory = new Set(history.map((h) => h.identity.key));
   const dropped: Deletions = {};
-  for (const t of tracks) if (!kept.has(t.identity.key)) dropped[trackDeletion(t.identity.key)] = now;
-  for (const h of history) if (!kept.has(h.identity.key)) dropped[historyDeletion(h.identity.key)] = now;
+  for (const t of oldTracks) {
+    if (!keptTracks.has(t.identity.key)) dropped[trackDeletion(t.identity.key)] = now;
+  }
+  for (const h of oldHistory) {
+    if (!keptHistory.has(h.identity.key)) dropped[historyDeletion(h.identity.key)] = now;
+  }
   await removeAllTrackData();
   await Promise.all([
     settingsItem.setValue(backup.settings),
     uiPrefsItem.setValue(backup.uiPrefs),
-    historyItem.setValue(backup.history),
+    historyItem.setValue(history),
     favoritesItem.setValue(backup.favorites),
     eqPresetsItem.setValue(backup.eqPresets),
     deletionsItem.setValue(pruneDeletions(mergeDeletions(backup.deletions, dropped), now)),
-    ...backup.tracks.map(saveTrackData),
+    ...tracks.map(saveTrackData),
   ]);
 }
