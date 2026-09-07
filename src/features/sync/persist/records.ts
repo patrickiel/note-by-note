@@ -54,14 +54,21 @@ export async function readRecords(items: Record<string, unknown>): Promise<Share
   }
   return parseShared(shared);
 }
+/** One record that cannot fit is reported and left behind, never truncated. */
+export interface RecordChanges { changes: Record<string, unknown>; skipped: string[] }
+export const skippedMessage = (skipped: string[]) => `${skipped.length} saved ${skipped.length === 1
+  ? 'record is' : 'records are'} too large to sync. Everything else synced; all data is kept on this device.`;
+
 /** Write complete independent records. There is no chunk assembly or truncation. */
-export async function changedRecords(local: SharedLibrary, remote: SharedLibrary, existing: Record<string, unknown>) {
+export async function changedRecords(local: SharedLibrary, remote: SharedLibrary, existing: Record<string, unknown>): Promise<RecordChanges> {
   const previous = records(remote);
   const changes: Record<string, unknown> = {};
+  const skipped: string[] = [];
   for (const [key, value] of Object.entries(records(local))) {
     if (existing[key] !== undefined && canonical(value) === canonical(previous[key])) continue;
     const item = { version: 4, data: await compress(canonical(value)) };
-    if (bytesUsed({ [key]: item }) > 8192) throw new Error('A saved record is too large to sync. All data is kept on this device; export a backup to transfer it.');
+    // One outsized song must not hold back every other record for good.
+    if (bytesUsed({ [key]: item }) > 8192) { skipped.push(key); continue; }
     changes[key] = item;
   }
   const proposed = { ...existing, ...changes };
@@ -69,5 +76,5 @@ export async function changedRecords(local: SharedLibrary, remote: SharedLibrary
   if (bytesUsed(proposed) > QUOTA_BYTES || Object.keys(proposed).length > 512) {
     throw new Error('Browser sync storage is full. All data is kept on this device; export a backup to transfer it.');
   }
-  return changes;
+  return { changes, skipped };
 }

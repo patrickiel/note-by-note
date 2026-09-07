@@ -110,7 +110,7 @@
   }
 
   function clearHistoryConfirmed() {
-    if (confirm('Remove all saved songs from the history list?')) {
+    if (confirm('Remove every song in Recent, with its markers, snippets and settings? Favorites are kept.')) {
       void history.clear();
     }
   }
@@ -608,12 +608,12 @@
         <span class="flex-none flex justify-center w-6 text-muted"
           ><Icon name="clearAll" size={18} /></span
         >
-        {@render prefText('Clear history', 'Remove all saved songs from the Recent list.')}
+        {@render prefText('Clear history', 'Delete every song in the Recent list, with its markers and snippets. Favorites are kept.')}
         <button
           type="button"
           class="flex-none py-1 px-2 text-[13px] font-bold text-accent-ink rounded-sm hover:not-disabled:bg-accent-soft disabled:opacity-40 disabled:cursor-default"
           onclick={clearHistoryConfirmed}
-          {@attach tooltip('Remove every saved song from Recent')}
+          {@attach tooltip('Delete every song in Recent; favorites are kept')}
         >
           Clear
         </button>

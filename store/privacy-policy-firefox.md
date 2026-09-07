@@ -40,7 +40,7 @@ Firefox caps synced storage at 100 KB per extension and 8 KB per item. If a comp
 **Permissions and why**
 
 - `storage` — saves your markers, loops, snippets and settings on your device.
-- `alarms` ? retries background sync while the panel is closed.
+- `alarms` — retries background sync while the panel is closed.
 - `activeTab`, `scripting` — injects the audio engine into the tab when you press Connect.
 - `tabs` — reads the active tab's URL and title to look up the practice data you saved for that track.
 - Access to all sites (optional) — requested **only** when you first press Connect, never at install time, because you choose which sites to practise on. Settings → Revoke Permissions takes it back.

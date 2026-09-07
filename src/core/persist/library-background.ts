@@ -4,7 +4,7 @@ import { libraryItem } from './library-client';
 import { parseBackupJson as parseLegacy } from './legacy-backup';
 import { parseLibrary } from './backup-codec';
 import { migrateBackup } from './library-migration';
-import { bytesUsed, changedRecords, legacyKeys, PREFIX, readRecords } from '../../features/sync/persist/records';
+import { bytesUsed, changedRecords, legacyKeys, PREFIX, readRecords, skippedMessage } from '../../features/sync/persist/records';
 import { loadSyncConfig, syncConfigItem, type SyncConfig } from '../../features/sync/persist/sync-config';
 
 const WAKE = 'library-sync';
@@ -18,19 +18,32 @@ export function startLibraryBackground() {
     queue = result.catch(() => {});
     return result;
   };
+  /** `parseLegacy` rejects a damaged file, which is right for a backup the user
+   * picked but fatal here: a single bad row would leave the panel with no
+   * library at all, on every start, forever. Unusable rows are dropped instead,
+   * and a parse that still fails yields an empty library. Either way the old
+   * records are left in place, so nothing is beyond recovery. */
+  const migrate = (raw: Record<string, unknown>): Library => {
+    const defaults = emptyLibrary();
+    const identified = (value: unknown) => (Array.isArray(value) ? value : []).filter((row) =>
+      typeof (row as { identity?: { normalizedUrl?: unknown } })?.identity?.normalizedUrl === 'string');
+    try {
+      return migrateBackup(parseLegacy({ format: 'note-by-note-backup', version: 1,
+        settings: raw.settings ?? defaults.shared.settings.value, uiPrefs: raw.uiPrefs ?? defaults.local.uiPrefs,
+        history: identified(raw.history), favorites: identified(raw.favorites),
+        eqPresets: Array.isArray(raw.eqPresets) ? raw.eqPresets : [],
+        tracks: identified(Object.entries(raw).filter(([key]) => key.startsWith('track:')).map(([, value]) => value)),
+      }));
+    } catch (error) {
+      console.error('[note-by-note] the previous library could not be migrated; its records are kept', error);
+      return defaults;
+    }
+  };
   let ready: Promise<void> | undefined;
   const init = () => ready ??= (async () => {
-    const raw = await browser.storage.local.get(null);
-    if (!raw.library) {
-      const defaults = emptyLibrary();
-      const legacy = parseLegacy({ format: 'note-by-note-backup', version: 1,
-        settings: raw.settings ?? defaults.shared.settings.value, uiPrefs: raw.uiPrefs ?? defaults.local.uiPrefs,
-        history: raw.history ?? [], favorites: raw.favorites ?? [], eqPresets: raw.eqPresets ?? [],
-        tracks: Object.entries(raw).filter(([key]) => key.startsWith('track:')).map(([, value]) => value),
-      });
-      await libraryItem.setValue(migrateBackup(legacy));
-      // The old records remain recoverable; they are never read or written after migration.
-    }
+    // Only the migration needs every old key. Ordinary wakes read one item.
+    if ((await browser.storage.local.get('library')).library) return;
+    await libraryItem.setValue(migrate(await browser.storage.local.get(null)));
   })().catch((error) => { ready = undefined; throw error; });
   const saveConfig = (config: SyncConfig) => syncConfigItem.setValue(config);
   const schedule = async () => {
@@ -49,7 +62,7 @@ export function startLibraryBackground() {
       const local = await libraryItem.getValue();
       const shared = mergeShared(local.shared, remote);
       if (canonical(shared) !== canonical(local.shared)) await libraryItem.setValue({ ...local, shared });
-      const changes = await changedRecords(shared, remote, existing);
+      const { changes, skipped } = await changedRecords(shared, remote, existing);
       if (Object.keys(changes).length) {
         if (Date.now() < config.lastPushAt + 30000) { await schedule(); return; }
         // Legacy bytes may occupy the quota. Their contents are durable locally before removal.
@@ -62,7 +75,7 @@ export function startLibraryBackground() {
         config.usedBytes = bytesUsed(final);
       }
       config.lastSyncedAt = Date.now();
-      config.lastError = null;
+      config.lastError = skipped.length ? skippedMessage(skipped) : null;
     } catch (error) {
       config.lastError = error instanceof Error ? error.message : String(error);
     } finally {
@@ -81,13 +94,17 @@ export function startLibraryBackground() {
   onMessage('librarySync', ({ data }) => enqueue(async () => {
     const config = await loadSyncConfig();
     if (data === 'disable' || data === 'delete') {
-      await saveConfig({ ...config, enabled: false, syncing: false });
+      // Disabled before anything is removed, so a worker restart part-way
+      // through the delete cannot wake up and upload the library again.
+      await saveConfig(data === 'delete'
+        ? { ...config, enabled: false, syncing: false, lastSyncedAt: 0, usedBytes: 0, lastError: null }
+        : { ...config, enabled: false, syncing: false });
       await browser.alarms.clear(WAKE);
       if (data === 'delete') {
         const items = await browser.storage.sync.get(null);
-        const keys = Object.keys(items).filter((key) => key.startsWith(PREFIX) || legacyKeys(items).includes(key));
+        const old = new Set(legacyKeys(items));
+        const keys = Object.keys(items).filter((key) => key.startsWith(PREFIX) || old.has(key));
         if (keys.length) await browser.storage.sync.remove(keys);
-        await saveConfig({ ...config, enabled: false, syncing: false, lastSyncedAt: 0, usedBytes: 0, lastError: null });
       }
       return;
     }

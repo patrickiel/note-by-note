@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { applyCommand, canonical, cell, emptyLibrary, favoriteEntries, mergeShared, nextRevision, recentEntries } from './library.ts';
 import { migrateBackup } from './library-migration.ts';
 import { parseBackupJson } from './backup-codec.ts';
-import { DEFAULT_PARAMS, DEFAULT_SETTINGS, DEFAULT_UI_PREFS } from '../model/defaults.ts';
+import { DEFAULT_PARAMS, DEFAULT_SETTINGS, DEFAULT_UI_PREFS, DELETION_LIMIT, SONG_LIMIT } from '../model/defaults.ts';
 import { makeTrackIdentity } from '../model/track-identity.ts';
 
 const identity = makeTrackIdentity('https://www.youtube.com/watch?v=example', 'Song', 200);
@@ -48,11 +48,38 @@ test('merge is commutative, associative and idempotent, including deletions and 
 test('local activity, layout, last-used parameters and chord analysis never change shared data', () => {
   const original = save();
   let next = applyCommand(original, { type: 'visit', key: identity.key });
-  next = applyCommand(next, { type: 'recent.remove' });
   next = applyCommand(next, { type: 'chart', key: identity.key, chart: null });
   next = applyCommand(next, { type: 'uiPrefs', value: { ...DEFAULT_UI_PREFS, markerView: 'list' } });
   next = applyCommand(next, { type: 'settings', patch: { lastUsedParams: { ...DEFAULT_PARAMS, speed: 0.2 } } });
   assert.deepEqual(next.shared, original.shared);
+});
+
+test('removing from history deletes the saved song, and the deletion crosses devices', () => {
+  const library = save();
+  const removed = applyCommand(library, { type: 'recent.remove', key: identity.key }, 300);
+  assert.equal(removed.shared.songs[identity.key].practice.value, null);
+  assert.equal(recentEntries(removed).length, 0);
+  assert.equal(removed.local.lastAccessed[identity.key], undefined);
+  // An older copy from another device must not resurrect it.
+  assert.equal(mergeShared(library.shared, removed.shared).songs[identity.key].practice.value, null);
+  const cleared = applyCommand(library, { type: 'recent.remove' }, 300);
+  assert.equal(cleared.shared.songs[identity.key].practice.value, null);
+});
+
+test('saved songs stay inside the sync record limit, keeping favorites and the newest', () => {
+  const track = (n: number) => makeTrackIdentity('https://www.youtube.com/watch?v=s' + n, 'Song ' + n, 200);
+  let library = emptyLibrary();
+  for (let n = 0; n < SONG_LIMIT + DELETION_LIMIT + 20; n++) {
+    library = applyCommand(library, { type: 'practice', identity: track(n), patch: {}, recent: false }, 100 + n);
+    if (n === 0) library = applyCommand(library, { type: 'favorite', key: track(0).key, value: true }, 100 + n);
+  }
+  const live = Object.values(library.shared.songs).filter((song) => song.practice.value !== null);
+  assert.equal(live.length, SONG_LIMIT);
+  assert.ok(library.shared.songs[track(0).key].practice.value, 'a favorite outlives the limit');
+  assert.equal(library.shared.songs[track(1).key], undefined, 'the oldest deletions are finally forgotten');
+  // Deletions are bounded too, so the synced record count cannot grow forever.
+  assert.ok(Object.keys(library.shared.songs).length <= SONG_LIMIT + DELETION_LIMIT);
+  assert.deepEqual(library.shared.favoriteOrder.value, [track(0).key]);
 });
 
 test('field patches preserve other session and remote edits', () => {

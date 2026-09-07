@@ -44,6 +44,15 @@ export function countInDurationMs(beats: number, bpm: number): number {
 
 export const HISTORY_LIMIT = 200;
 
+/** A saved song lives while it is favorited, in Recent, or among the most
+ * recently opened. Past that the record is dropped, because every song is one
+ * `browser.storage.sync` item and the browser caps those at 512. */
+export const SONG_LIMIT = 300;
+/** Dropped songs stay as dated deletions so the removal crosses devices. Only
+ * the newest are kept; a device offline for longer than that many deletions
+ * re-adds its own copy, which is the cost of never growing without bound. */
+export const DELETION_LIMIT = 100;
+
 export const DEFAULT_KEYMAP: Record<ActionId, string> = {
   playPause: 'Space',
   seekBack: 'ArrowLeft',

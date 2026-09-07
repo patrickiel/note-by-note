@@ -1,4 +1,4 @@
-import { DEFAULT_PARAMS, DEFAULT_SETTINGS, DEFAULT_UI_PREFS, HISTORY_LIMIT } from '../model/defaults.ts';
+import { DEFAULT_PARAMS, DEFAULT_SETTINGS, DEFAULT_UI_PREFS, DELETION_LIMIT, HISTORY_LIMIT, SONG_LIMIT } from '../model/defaults.ts';
 import type { ChordChart, EffectParams, FavoriteEntry, HistoryEntry, Settings, TrackData, TrackIdentity, UiPrefs } from '../model/types';
 
 /** One revision per independently editable value. Null/false are durable deletions. */
@@ -88,6 +88,35 @@ export type LibraryCommand =
   | { type: 'preset'; name: string; gains: number[] | null }
   | { type: 'import'; library: Library };
 
+/** A song is kept while it is favorited, listed in Recent, or among the most
+ * recently opened. Anything else becomes a dated deletion so that dropping it
+ * crosses devices instead of being merged straight back; the oldest deletions
+ * are finally forgotten. Without this every song ever played would stay in
+ * `shared.songs` forever and eventually fill the sync quota, after which
+ * nothing at all syncs. */
+function prune(library: Library, at: number): void {
+  const { shared, local } = library;
+  const kept = new Set(Object.keys(shared.songs)
+    .filter((key) => shared.songs[key].favorite.value || key in local.recent));
+  const rest = Object.keys(shared.songs)
+    .filter((key) => !kept.has(key) && shared.songs[key].practice.value !== null)
+    .sort((a, b) => (local.lastAccessed[b] ?? 0) - (local.lastAccessed[a] ?? 0));
+  for (const key of rest.slice(Math.max(0, SONG_LIMIT - kept.size))) {
+    shared.songs[key] = { practice: cell(null, at), favorite: cell(false, at) };
+  }
+  const deleted = Object.keys(shared.songs).filter((key) => shared.songs[key].practice.value === null)
+    .sort((a, b) => shared.songs[b].practice.at - shared.songs[a].practice.at);
+  for (const key of deleted.slice(DELETION_LIMIT)) delete shared.songs[key];
+  for (const key of deleted) {
+    delete local.recent[key];
+    delete local.lastAccessed[key];
+    delete local.charts[key];
+  }
+  // A star that no longer names a saved song only costs sync bytes.
+  const order = shared.favoriteOrder.value.filter((key) => shared.songs[key]?.favorite.value);
+  if (order.length !== shared.favoriteOrder.value.length) shared.favoriteOrder = cell(order, at);
+}
+
 /** Called only by the background writer. Incoming edits patch current saved data. */
 export function applyCommand(library: Library, command: LibraryCommand, now = Date.now()): Library {
   const next = structuredClone(library);
@@ -121,16 +150,24 @@ export function applyCommand(library: Library, command: LibraryCommand, now = Da
       if (shared.songs[command.key]?.practice.value) local.lastAccessed[command.key] = now;
       break;
     }
-    case 'recent.remove':
-      if (command.key === undefined) local.recent = {};
-      else delete local.recent[command.key];
+    case 'recent.remove': {
+      // "Remove from history" is the only delete the UI offers, so it removes
+      // the saved song itself. A favorite is kept — its own row only unstars —
+      // and falls back to the limit above once it is neither.
+      const keys = command.key === undefined ? Object.keys(local.recent) : [command.key];
+      for (const key of keys) {
+        delete local.recent[key];
+        const song = shared.songs[key];
+        if (song && !song.favorite.value) song.practice = cell(null, at);
+      }
       break;
+    }
     case 'chart': local.charts[command.key] = command.chart; break;
     case 'settings': {
       const { lastUsedParams, updatedAt: ignored, ...patch } = command.patch;
       if (lastUsedParams) local.lastUsedParams = lastUsedParams;
       if (command.reset || Object.keys(patch).length) {
-        const value = { ...(command.reset ? DEFAULT_SETTINGS : shared.settings.value), ...patch };
+        const value = { ...(command.reset ? structuredClone(DEFAULT_SETTINGS) : shared.settings.value), ...patch };
         if (patch.rememberSettings) value.autoReset = false;
         if (patch.autoReset) value.rememberSettings = false;
         shared.settings = cell(value, at);
@@ -160,6 +197,7 @@ export function applyCommand(library: Library, command: LibraryCommand, now = Da
       break;
     }
   }
+  prune(next, at);
   return next;
 }
 

@@ -16,16 +16,18 @@ class TrackSync {
   #media: MediaInfo | null = null;
   #generation = 0;
   #restoring = false;
-  #edited = false;
   #hasSavedParams = false;
   #chordsEnabled = false;
+  /** Parameter changes arrive per input event while a slider is dragged, and
+   * every save rewrites the whole library. Coalesce them into one write. */
+  #paramsTimer: ReturnType<typeof setTimeout> | undefined;
 
   init() {
     markers.onPersist = (list) => this.#save({ markers: list });
     snippets.onPersist = () => this.#save({ snippets: $state.snapshot(snippets.list),
       sequenceLoop: snippets.sequenceLoop, sequenceCountIn: snippets.sequenceCountIn });
     chords.onPersist = () => {
-      if (!this.#identity) return;
+      if (!this.#identity || this.#restoring) return;
       // Generated analysis is local and does not date the saved practice record.
       void editLibrary({ type: 'chart', key: this.#identity.key, chart: $state.snapshot(chords.chart) });
       if (this.#chordsEnabled !== chords.enabled) {
@@ -36,6 +38,7 @@ class TrackSync {
   }
 
   onEngineLost() {
+    this.#flushParams();
     this.#generation++;
     this.#identity = null;
     this.#media = null;
@@ -46,16 +49,20 @@ class TrackSync {
     const identity = makeTrackIdentity(media.pageUrl, media.title, media.duration);
     this.#media = media;
     if (this.#identity?.key === identity.key) { this.#identity = identity; return; }
+    this.#flushParams();
     this.#identity = identity;
-    this.#edited = false;
     this.#hasSavedParams = false;
     const generation = ++this.#generation;
-    const saved = await readLibrary();
-    if (generation !== this.#generation || this.#edited) return;
-    const practice = saved.shared.songs[identity.key]?.practice.value;
-    this.#hasSavedParams = !!practice?.params;
+    // Saving is closed for the whole load, not just the apply: the stores still
+    // hold the previous song, and `#identity` already names this one, so any
+    // edit landing inside the await would write that song's markers, snippets
+    // and parameters onto this one.
     this.#restoring = true;
     try {
+      const saved = await readLibrary();
+      if (generation !== this.#generation) return;
+      const practice = saved.shared.songs[identity.key]?.practice.value;
+      this.#hasSavedParams = !!practice?.params;
       markers.load(practice?.markers ?? []);
       snippets.load(practice?.snippets ?? [], practice?.sequenceLoop ?? false, practice?.sequenceCountIn ?? false);
       chords.load(saved.local.charts[identity.key] ?? null, practice?.chordsEnabled);
@@ -64,12 +71,25 @@ class TrackSync {
         settings.current.rememberSettings ? settings.current.lastUsedParams : undefined);
       if (params) session.patchParams(structuredClone(params));
     } finally {
-      this.#restoring = false;
+      // A newer track already owns the flag; only its own load may clear it.
+      if (generation === this.#generation) this.#restoring = false;
     }
+    if (generation !== this.#generation) return;
     await editLibrary({ type: 'visit', key: identity.key });
   }
 
   onParamsChanged() {
+    if (this.#restoring) return;
+    clearTimeout(this.#paramsTimer);
+    this.#paramsTimer = setTimeout(() => this.#flushParams(), 1500);
+  }
+
+  /** Writes the parameters a drag settled on. Also called before the track
+   * changes, so the last edit is never lost to the pending timer. */
+  #flushParams() {
+    if (this.#paramsTimer === undefined) return;
+    clearTimeout(this.#paramsTimer);
+    this.#paramsTimer = undefined;
     if (this.#restoring) return;
     const params = $state.snapshot(session.params) as EffectParams;
     this.#save({ params });
@@ -78,7 +98,6 @@ class TrackSync {
 
   #save(patch: Partial<Practice>) {
     if (!this.#identity || this.#restoring) return;
-    this.#edited = true;
     if (!this.#hasSavedParams) patch = { params: $state.snapshot(session.params), ...patch };
     this.#hasSavedParams = true;
     void editLibrary({ type: 'practice', identity: this.#identity,
@@ -91,6 +110,7 @@ class TrackSync {
     const playing = this.#identity?.key;
     if (playing === entry.identity.key) {
       // Explicitly opening the saved song adopts its current library revision.
+      this.#flushParams();
       this.#identity = null;
       await this.onMedia(this.#media);
       return;

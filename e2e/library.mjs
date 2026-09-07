@@ -58,7 +58,7 @@ try {
 
   await first.evaluate(() => { window.libraryReloadSentinel = 42; });
   const remote = applyCommand(saved, { type: 'favorite', key: identity(0).key, value: true }, Date.now() + 1000);
-  const remoteItems = await changedRecords(remote.shared, emptyLibrary().shared, {});
+  const { changes: remoteItems } = await changedRecords(remote.shared, emptyLibrary().shared, {});
   await first.evaluate((items) => chrome.storage.sync.set(items), remoteItems);
   await sync(first, 'enable');
   const merged = await read(first);

@@ -34,7 +34,12 @@ class SettingsStore {
     this.loaded = true;
     settingsItem.watch((value) => {
       if (this.#writing) return;
+      const before = this.current.theme;
       this.current = this.#withDefaults(value);
+      // Settings can land here without any local control having been touched —
+      // a backup import, or a merge from another device — and `applyTheme` is
+      // what actually paints <html data-theme>.
+      if (this.current.theme !== before) applyTheme(this.current.theme);
       this.onChange?.(this.current);
     });
   }
