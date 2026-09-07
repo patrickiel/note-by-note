@@ -1,6 +1,6 @@
 import { DEFAULT_PARAMS, DEFAULT_SETTINGS, DEFAULT_UI_PREFS } from '../model/defaults.ts';
 import { songKey } from '../model/track-identity.ts';
-import { emptyLibrary, type Library, type SharedLibrary } from './library.ts';
+import { type Library, type SharedLibrary } from './library.ts';
 import { parseBackupJson as parseLegacy } from './legacy-backup.ts';
 import { migrateBackup } from './library-migration.ts';
 
@@ -92,10 +92,12 @@ export function parseLibrary(value: unknown): Library {
     if (chart.key !== null) { object(chart.key); string(chart.key.tonic); string(chart.key.mode); number(chart.key.confidence); }
   }
   const recent = object(local.recent);
-  for (const row of Object.values(recent)) { object(row); number(row.updatedAt); number(row.lastAccessedAt); }
+  Object.values(recent).forEach(number);
+  const lastAccessed = object(local.lastAccessed);
+  Object.values(lastAccessed).forEach(number);
   return {
     shared: parseShared(source.shared),
-    local: { uiPrefs: defaults(local.uiPrefs, DEFAULT_UI_PREFS), recent, charts,
+    local: { uiPrefs: defaults(local.uiPrefs, DEFAULT_UI_PREFS), recent, lastAccessed, charts,
       ...(local.lastUsedParams ? { lastUsedParams: defaults(local.lastUsedParams, DEFAULT_PARAMS) } : {}) },
   };
 }

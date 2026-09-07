@@ -50,7 +50,7 @@ draws a chart under the timeline.
 **Keeping your place.** Settings are stored per track against a normalized URL,
 so reopening a video brings back its pitch, speed, markers, loops and snippets —
 however you open it, not just from the library. Favorites and
-recents live in a library tab, and optional cross-device sync carries it all
+recents live in a library tab, and optional cross-device sync carries saved practice data and favorites
 to your other browsers through the browser's own sync — no server, no account.
 
 ## Installing it
@@ -162,9 +162,8 @@ the other way round.
   extension means reloading the page too.
 - `note-by-note-center-cut` is a string literal on both sides of the worklet
   boundary — `tsc` won't catch a mismatch, you'll get an `InvalidStateError`.
-- The e2e suite passes 22 of 30 checks. The audio path is solid; the failures
-  are in marker chips, loop/sequence bounds, the tab-capture CTA and the
-  vocal-reducer control — known and pre-existing.
+- The playback E2E suite has 47 checks. `node e2e/library.mjs` additionally
+  checks concurrent library edits, remote updates, restart recovery and sync capacity.
 
 ## Sync
 

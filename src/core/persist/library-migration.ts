@@ -36,13 +36,14 @@ export function migrateBackup(backup: Backup): Library {
   for (const entry of backup.history) {
     if (entry.deleted) continue;
     const key = ensure(entry.identity).practice.value!.identity.key;
-    local.recent[key] = { updatedAt: entry.updatedAt, lastAccessedAt: entry.updatedAt };
+    local.recent[key] = entry.updatedAt;
+    local.lastAccessed[key] = entry.updatedAt;
   }
   for (const entry of backup.favorites) {
     const song = ensure(entry.identity);
     song.favorite = newest(song.favorite, cell(!entry.deleted, entry.deleted ? entry.updatedAt : entry.favoritedAt));
     const key = song.practice.value!.identity.key;
-    if (local.recent[key]) local.recent[key].lastAccessedAt = Math.max(local.recent[key].lastAccessedAt, entry.lastAccessedAt);
+    local.lastAccessed[key] = Math.max(local.lastAccessed[key] ?? 0, entry.lastAccessedAt);
   }
   shared.favoriteOrder = cell(backup.favorites.filter((f) => !f.deleted)
     .map((f) => makeTrackIdentity(f.identity.normalizedUrl, f.identity.title, f.identity.durationSec).key),

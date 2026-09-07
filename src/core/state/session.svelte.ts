@@ -85,11 +85,8 @@ class SessionStore {
     volume(volume: number): void;
   } | null = null;
 
-  /** The one place `media` is written, so `onMediaChanged` cannot miss a
-   * change: the connection layer clears it on paths that send no event. */
   setMedia(media: MediaInfo | null) {
     this.media = media;
-    this.onMediaChanged?.(media);
   }
 
   attachTransport(send: (cmd: EngineCommand) => void) {

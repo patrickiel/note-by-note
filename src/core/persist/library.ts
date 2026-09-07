@@ -22,7 +22,8 @@ export interface Library {
   shared: SharedLibrary;
   local: {
     uiPrefs: UiPrefs;
-    recent: Record<string, { updatedAt: number; lastAccessedAt: number }>;
+    recent: Record<string, number>;
+    lastAccessed: Record<string, number>;
     charts: Record<string, ChordChart | null>;
     lastUsedParams?: EffectParams;
   };
@@ -32,7 +33,7 @@ export const cell = <T>(value: T, at = 0): Versioned<T> => ({ at, value });
 export function emptyLibrary(): Library {
   return {
     shared: { settings: cell(structuredClone(DEFAULT_SETTINGS)), songs: {}, presets: {}, favoriteOrder: cell([]) },
-    local: { uiPrefs: structuredClone(DEFAULT_UI_PREFS), recent: {}, charts: {} },
+    local: { uiPrefs: structuredClone(DEFAULT_UI_PREFS), recent: {}, lastAccessed: {}, charts: {} },
   };
 }
 
@@ -102,8 +103,9 @@ export function applyCommand(library: Library, command: LibraryCommand, now = Da
       };
       song.practice = cell({ ...base, ...command.patch, identity: command.identity }, at);
       shared.songs[key] = song;
-      if (command.recent || local.recent[key]) local.recent[key] = { updatedAt: now, lastAccessedAt: now };
-      const keep = Object.entries(local.recent).sort((a, b) => b[1].updatedAt - a[1].updatedAt).slice(0, HISTORY_LIMIT);
+      if (command.recent || key in local.recent) local.recent[key] = now;
+      local.lastAccessed[key] = now;
+      const keep = Object.entries(local.recent).sort((a, b) => b[1] - a[1]).slice(0, HISTORY_LIMIT);
       local.recent = Object.fromEntries(keep);
       break;
     }
@@ -116,8 +118,7 @@ export function applyCommand(library: Library, command: LibraryCommand, now = Da
     }
     case 'order': shared.favoriteOrder = cell([...new Set(command.keys)], at); break;
     case 'visit': {
-      const recent = local.recent[command.key];
-      if (recent) recent.lastAccessedAt = now;
+      if (shared.songs[command.key]?.practice.value) local.lastAccessed[command.key] = now;
       break;
     }
     case 'recent.remove':
@@ -170,7 +171,7 @@ export function songEntry(key: string, library: Library): HistoryEntry | null {
   return {
     identity: practice.identity, pageUrl: practice.pageUrl, thumbnailUrl: practice.thumbnailUrl,
     params: practice.params ?? structuredClone(DEFAULT_PARAMS),
-    createdAt: song.practice.at, updatedAt: library.local.recent[key]?.updatedAt ?? song.practice.at,
+    createdAt: song.practice.at, updatedAt: library.local.recent[key] ?? song.practice.at,
   };
 }
 export function recentEntries(library: Library): HistoryEntry[] {
@@ -183,6 +184,6 @@ export function favoriteEntries(library: Library): FavoriteEntry[] {
     const song = library.shared.songs[key];
     const entry = songEntry(key, library);
     return song?.favorite.value && entry ? [{ ...entry, favoritedAt: song.favorite.at,
-      lastAccessedAt: library.local.recent[key]?.lastAccessedAt ?? song.favorite.at }] : [];
+      lastAccessedAt: library.local.lastAccessed[key] ?? song.favorite.at }] : [];
   });
 }

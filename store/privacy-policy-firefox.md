@@ -19,9 +19,9 @@ Uninstalling the extension removes all of it. Settings → Reset Settings clears
 
 The extension makes no network requests of its own. The one thing that leaves your device is the optional cross-device sync copy, and it leaves through Firefox Sync — the same channel that carries your bookmarks — to the other devices signed into the same Firefox account. If Firefox Sync is off, nothing leaves the device.
 
-Sync is on by default. When there is something to sync, it writes one compact snapshot into the browser's synced extension storage containing your settings and UI preferences, your EQ presets, your Recent and Favorites lists — including the page URL and title of tracks you practised — and your per-track data (markers and labels, loop ranges, snippets, chord charts).
+Sync is on by default. It writes independent compressed records containing settings, EQ presets, saved songs (including URLs, titles, durations and thumbnail URLs), favorites and manual order, practice parameters, markers, labels and snippets. Recent activity, UI layout, last-used parameters and generated chord analysis stay on the device and are included in manual backup exports.
 
-Because that snapshot contains the addresses of pages you have visited, this listing declares the `browsingActivity` data-collection category.
+Because that data contains the addresses of pages you have visited, this listing declares the `browsingActivity` data-collection category.
 
 Not included: audio, page content, keystrokes, browsing history beyond the tracks you practised on, or anything identifying you personally.
 
@@ -29,7 +29,7 @@ Not included: audio, page content, keystrokes, browsing history beyond the track
 
 Into Firefox Sync's storage under your Firefox account, end-to-end encrypted, subject to Mozilla's own data handling. The author operates no server and can see none of it. There are no accounts with us and no sync ID.
 
-Firefox caps this storage at 100 KB per extension. The snapshot is stored compact and compressed so a typical library fits with room to spare; when one doesn't, the oldest songs and chord charts stay on the device that has them and the Settings page says so.
+Firefox caps synced storage at 100 KB per extension and 8 KB per item. If a compressed record or the library exceeds those limits, Settings reports an error. All data remains saved locally; no songs are automatically trimmed.
 
 **Turning it off and deleting the data**
 
@@ -40,6 +40,7 @@ Firefox caps this storage at 100 KB per extension. The snapshot is stored compac
 **Permissions and why**
 
 - `storage` — saves your markers, loops, snippets and settings on your device.
+- `alarms` ? retries background sync while the panel is closed.
 - `activeTab`, `scripting` — injects the audio engine into the tab when you press Connect.
 - `tabs` — reads the active tab's URL and title to look up the practice data you saved for that track.
 - Access to all sites (optional) — requested **only** when you first press Connect, never at install time, because you choose which sites to practise on. Settings → Revoke Permissions takes it back.
@@ -56,4 +57,4 @@ Material changes to this policy will be recorded in the repository's commit hist
 
 Questions or requests: open an issue at [github.com/patrickiel/note-by-note/issues](https://github.com/patrickiel/note-by-note/issues).
 
-Last updated: 28 July 2026. Operator: Patrick Demichiel.
+Last updated: 7 September 2026. Operator: Patrick Demichiel.

@@ -24,7 +24,7 @@ files.
 
 ```powershell
 pnpm check      # svelte-check / TypeScript — the only type or lint gate
-pnpm test:dsp   # node --test, the unit tests (DSP, chords, backup codec, sync fit)
+pnpm test:dsp   # node --test, the unit tests (DSP, chords, library, backup migration, sync records)
 pnpm build      # production build → .output/chrome-mv3
 ```
 

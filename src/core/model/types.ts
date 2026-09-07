@@ -41,7 +41,7 @@ export interface EqPreset {
    * before sync merged; reads as 0, so any dated copy beats them. */
   updatedAt?: number;
   /** A tombstone: the preset was deleted at `updatedAt`, and the row is kept
-   * so a sync merge can tell "removed" from "never had it" (deletions.ts).
+   * so a sync merge can tell "removed" from "never had it" (legacy backups).
    * `gains` is emptied — nothing reads them again. */
   deleted?: true;
 }
@@ -122,9 +122,7 @@ export interface TrackData {
   sequenceLoop: boolean;
   /** Count in on play and before each snippet repeat lap (not on section loop). */
   sequenceCountIn: boolean;
-  /** Cached chord/key chart from the last analysis run. Empty segments with a
-   * computedAt date mean deleted; null = never analyzed or trimmed from sync.
-   * (null, not undefined — patches serialize over the port, dropping undefined.) */
+  /** Legacy track shape and local analysis cache. New shared practice excludes this field. */
   chordChart?: ChordChart | null;
   /** Chords panel switch. Kept apart from the chart so switching off hides the
    * panel without discarding the analysis. Undefined on pre-switch records. */
@@ -140,10 +138,10 @@ export interface HistoryEntry {
   pageUrl: string;
   createdAt: number;
   /** Last save — or, with `deleted`, the removal. The one date a merge reads
-   * for this row (deletions.ts). */
+   * for this row (legacy backups). */
   updatedAt: number;
   /** A tombstone: the row was removed at `updatedAt`, and is kept so a sync
-   * merge can tell "removed" from "never had it" (deletions.ts). The panel
+   * merge can tell "removed" from "never had it" (legacy backups). The panel
    * stores filter these out, so nothing downstream ever sees one. */
   deleted?: true;
 }
