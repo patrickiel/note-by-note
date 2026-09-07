@@ -8,6 +8,7 @@
   import { sendMessage } from '@/core/messaging/rpc';
   import { openTabWithPanel } from '@/core/side-panel';
   import { installMockState, installMockTicker } from '@/dev/mock';
+  import { migrateStorage } from '@/core/persist/migrate';
   import { connection } from '@/core/state/connect.svelte';
   import { CAN_CAPTURE_TAB } from '@/core/platform';
   import { features } from '@/core/features';
@@ -22,8 +23,11 @@
   const mock = params.has('mock');
   // ?mock=1&play=1 also runs the playhead, for previewing time-driven UI.
   const mockPlay = mock && params.has('play');
-  // Each panel feature loads its own storage concurrently (see core/features.ts).
-  const ready = Promise.all(features.map((f) => f.init?.())).then(
+  // Storage first, then the features: a migration rewrites what they are about
+  // to read (see core/persist/migrate.ts). Each panel feature then loads its
+  // own storage concurrently (see core/features.ts).
+  const loadFeatures = () => Promise.all(features.map((f) => f.init?.()));
+  const ready = migrateStorage().then(loadFeatures).then(
     async () => {
       applyTheme(settings.current.theme);
       trackSync.init();

@@ -69,11 +69,11 @@ const fit = (backup: Backup) => fitBackup(backup, BUDGET_CHARS, measure);
  * deferred while a track is loaded and picked up on the next quiet moment,
  * panel open, or "Sync now".
  *
- * Runs in every open panel document (there can be more than one: a Firefox
- * window each, the local-player tab). They share `syncConfig` through its
- * watch, so at worst two push the same content, which the spacing absorbs.
- * A change the panel didn't manage to push before closing is remembered via
- * `pendingPush`.
+ * Runs in every open panel document, and there is more than one: Chromium
+ * gives each tab its own, Firefox each window. They share `syncConfig` through
+ * its watch but not their queues or timers, so at worst two push the same
+ * content, which the spacing absorbs. A change the panel didn't manage to push
+ * before closing is remembered via `pendingPush`.
  */
 class SyncStore {
   config = $state<SyncConfig>({ ...DEFAULT_SYNC_CONFIG });

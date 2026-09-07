@@ -1,4 +1,3 @@
-import { songKey } from '../../../core/model/track-identity.ts';
 import type { Backup } from '../../../core/persist/backup-codec.ts';
 import { isLive } from '../../../core/persist/deletions.ts';
 import type { HistoryEntry, TrackData, TrackIdentity } from '../../../core/model/types';
@@ -18,8 +17,8 @@ import type { HistoryEntry, TrackData, TrackIdentity } from '../../../core/model
  * Each group oldest first. Settings, UI prefs, EQ presets and tombstones
  * (`deletions.ts`) are never cut — a dropped tombstone is a row another
  * device brings straight back, and they are a handful of bytes each.
- * Songs are matched the way the library does (`songKey`: URL + title), so a
- * record saved under a drifted duration still follows its favorite.
+ * A song's row and its track record share one key, so a record always goes
+ * with the row it belongs to.
  *
  * `measure` is injected (and may be async): the caller decides what "size"
  * means — encoded JSON length in tests, the gzip+base64 blob for sync — so
@@ -45,7 +44,7 @@ export class LibraryTooLargeError extends Error {
 export const hasChart = (track: TrackData) =>
   !!track.chordChart && track.chordChart.segments.length > 0;
 
-/** A song (by `songKey`, row + record) or a chart (by track key). */
+/** A song (row + record) or a chart, both by the song's key. */
 interface Cut {
   kind: 'song' | 'chart';
   id: string;
@@ -58,10 +57,10 @@ const oldestFirst = (a: Cut, b: Cut) =>
 
 /** Everything that may go, in the order it goes. */
 function collectCuts(backup: Backup): Cut[] {
-  const favorites = new Set(backup.favorites.filter(isLive).map((f) => songKey(f.identity)));
+  const favorites = new Set(backup.favorites.filter(isLive).map((f) => f.identity.key));
   const songs = new Map<string, number>();
   const touch = (identity: TrackIdentity, at: number) => {
-    const id = songKey(identity);
+    const id = identity.key;
     if (!favorites.has(id)) songs.set(id, Math.max(songs.get(id) ?? 0, at));
   };
   for (const entry of backup.history.filter(isLive)) touch(entry.identity, entry.updatedAt ?? 0);
@@ -69,7 +68,7 @@ function collectCuts(backup: Backup): Cut[] {
 
   const accessed = new Map<string, number>();
   for (const f of backup.favorites.filter(isLive)) {
-    const id = songKey(f.identity);
+    const id = f.identity.key;
     const at = f.lastAccessedAt ?? f.updatedAt ?? 0;
     accessed.set(id, Math.max(accessed.get(id) ?? 0, at));
   }
@@ -87,7 +86,7 @@ function apply(backup: Backup, cuts: Cut[]): Backup {
   const songs = new Set(cuts.filter((c) => c.kind === 'song').map((c) => c.id));
   const charts = new Set(cuts.filter((c) => c.kind === 'chart').map((c) => c.id));
   const keep = (row: HistoryEntry | TrackData) =>
-    !isLive(row) || !songs.has(songKey(row.identity));
+    !isLive(row) || !songs.has(row.identity.key);
   return {
     ...backup,
     history: backup.history.filter(keep),

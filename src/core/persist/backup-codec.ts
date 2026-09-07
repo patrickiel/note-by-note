@@ -4,7 +4,7 @@ import {
   DEFAULT_UI_PREFS,
 } from '../model/defaults.ts';
 import { youtubeThumbnailUrl } from '../model/thumbnail.ts';
-import { identityKey } from '../model/track-identity.ts';
+import { songKey } from '../model/track-identity.ts';
 import type {
   ChordChart,
   ChordSegment,
@@ -114,10 +114,11 @@ export interface CompactParams {
   b?: number;
 }
 
-/** `[normalizedUrl, title, durationSec, key?]`. YouTube watch URLs are
- * shortened to `yt:<id>`. `key` appears only when it can't be rebuilt from the
- * other two — a safety net, never the case for keys this build made. */
-export type CompactSong = [string, string, number] | [string, string, number, string];
+/** `[normalizedUrl, title, durationSec]`. YouTube watch URLs are shortened to
+ * `yt:<id>`. The key is never stored: it is `songKey` of the first two, which
+ * is why a file written by a build that keyed songs differently still reads —
+ * each build derives the key it uses from the same two strings. */
+export type CompactSong = [string, string, number];
 
 export interface CompactEntry {
   /** Index into `songs`. */
@@ -451,14 +452,10 @@ class SongTable {
     const url = identity.normalizedUrl ?? '';
     const title = identity.title ?? '';
     const duration = Number.isFinite(identity.durationSec) ? identity.durationSec : 0;
-    const key = identity.key ?? identityKey(url, duration);
-    const tableKey = `${url}\n${title}\n${duration}\n${key}`;
+    const tableKey = `${url}\n${title}\n${duration}`;
     const existing = this.#index.get(tableKey);
     if (existing !== undefined) return existing;
-    const row: CompactSong =
-      key === identityKey(url, duration)
-        ? [shortUrl(url), title, duration]
-        : [shortUrl(url), title, duration, key];
+    const row: CompactSong = [shortUrl(url), title, duration];
     this.rows.push(row);
     this.#index.set(tableKey, this.rows.length - 1);
     return this.rows.length - 1;
@@ -468,12 +465,13 @@ class SongTable {
 function decodeSongs(raw: unknown): TrackIdentity[] {
   return arr(raw, 'songs').map((row) => {
     const r = arr(row, 'songs');
+    // A fourth element is a key from a build that stored one; the key is
+    // derived here either way, so it is read past rather than trusted.
     if (r.length < 3 || r.length > 4) throw damaged('songs');
     const normalizedUrl = longUrl(str(r[0], 'songs'));
     const title = str(r[1], 'songs');
     const durationSec = num(r[2], 'songs');
-    const key = r.length === 4 ? str(r[3], 'songs') : identityKey(normalizedUrl, durationSec);
-    return { key, normalizedUrl, title, durationSec };
+    return { key: songKey({ normalizedUrl, title }), normalizedUrl, title, durationSec };
   });
 }
 

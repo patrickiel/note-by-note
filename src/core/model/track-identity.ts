@@ -48,26 +48,28 @@ function hash(text: string): string {
   return (h >>> 0).toString(16);
 }
 
-/** Whether two library rows describe the same song. Deliberately not a `key`
- * comparison: the duration baked into `key` drifts (pre-roll ads, metadata that
- * settles late), which would split one song across several Recent rows. The
- * title is what keeps local files apart — they all share the local-player URL. */
-export function isSameTrack(a: TrackIdentity, b: TrackIdentity): boolean {
-  return a.normalizedUrl === b.normalizedUrl && a.title === b.title;
-}
-
-/** The storage key of a track: `${hash(normalizedUrl)}:${durationSec}`, with
- * `durationSec` already rounded. Exported so a compact backup can leave the key
- * out and rebuild it from the two strings it stores anyway (backup-codec.ts). */
-export function identityKey(normalizedUrl: string, durationSec: number): string {
-  return `${hash(normalizedUrl)}:${durationSec}`;
-}
-
-/** A short handle for what `isSameTrack` compares — URL and title, no
- * duration — so a record about "this song" (a sync deletion, say) reaches
- * every copy of it however its duration drifted. */
+/**
+ * What makes a song itself: its normalized URL and its title, hashed. This is
+ * `TrackIdentity.key` — the storage key of its track record, the id every
+ * library list is matched on, and what a tombstone names. One key, so no two
+ * parts of the app can disagree about what counts as the same song.
+ *
+ * **Duration is not in it.** It drifts — a pre-roll ad, metadata that settles
+ * late — and a key that moved with it split one song across several records,
+ * which every list then had to work around. Duration is metadata now: stored,
+ * shown, and updated in place.
+ *
+ * The title is in it because the URL alone is not enough: every local file
+ * reports the local-player page URL and is told apart only by its title, and
+ * a page can hold more than one song.
+ */
 export function songKey(identity: Pick<TrackIdentity, 'normalizedUrl' | 'title'>): string {
   return hash(`${identity.normalizedUrl}\n${identity.title}`);
+}
+
+/** Whether two library rows describe the same song. */
+export function isSameTrack(a: TrackIdentity, b: TrackIdentity): boolean {
+  return a.key === b.key;
 }
 
 export function makeTrackIdentity(
@@ -76,11 +78,11 @@ export function makeTrackIdentity(
   durationSec: number,
 ): TrackIdentity {
   const normalizedUrl = normalizeUrl(pageUrl);
-  const duration = Number.isFinite(durationSec) ? Math.round(durationSec) : 0;
+  const cleaned = cleanTitle(title);
   return {
-    key: identityKey(normalizedUrl, duration),
+    key: songKey({ normalizedUrl, title: cleaned }),
     normalizedUrl,
-    title: cleanTitle(title),
-    durationSec: duration,
+    title: cleaned,
+    durationSec: Number.isFinite(durationSec) ? Math.round(durationSec) : 0,
   };
 }

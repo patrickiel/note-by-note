@@ -25,7 +25,6 @@
  */
 
 import type { Backup } from './backup-codec.ts';
-import { songKey } from '../model/track-identity.ts';
 import type { HistoryEntry } from '../model/types';
 
 export const DELETION_TTL_MS = 30 * 24 * 60 * 60_000;
@@ -53,7 +52,7 @@ export const tombstone = <T extends Deletable>(item: T, now: number): T => ({
 export const pruneTombstones = <T extends Deletable>(list: T[], now: number): T[] =>
   list.filter((item) => isLive(item) || now - at(item) < DELETION_TTL_MS);
 
-const song = (entry: HistoryEntry) => songKey(entry.identity);
+const song = (entry: HistoryEntry) => entry.identity.key;
 
 /**
  * A replacement import, as items: the file's contents dated now, plus a

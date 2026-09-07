@@ -105,20 +105,19 @@ class TrackSync {
     if (identity.key === this.#applyingKey) return;
 
     if (identity.key === this.#identity?.key) {
-      // Same track — but the title may have settled late (SPA navigation).
-      if (identity.title !== this.#identity.title) {
-        this.#identity = identity;
-        if (this.#userAdjusted) await this.#saveCurrent();
-      }
-      // A no-op unless something changed what this song is or what is applied to
-      // it: the title just settled, or the engine restarted on the defaults.
+      // Same song. Its duration may have settled since (a pre-roll ad, slow
+      // metadata) — duration is metadata, not identity, so it is updated in
+      // place and nothing is re-keyed (`track-identity.ts`).
+      if (identity.durationSec !== this.#identity.durationSec) this.#identity = identity;
+      // A no-op unless the engine restarted on the defaults.
       if (!this.#userAdjusted) this.#restoreSaved(identity);
       return;
     }
 
-    // Same page, new duration — the metadata settled late (ad, slow load) and
-    // the track got keyed with a stale duration. Re-key in place instead of
-    // treating it as a track switch, so Recents doesn't get a duplicate row.
+    // Same page, new title — the site rewrote document.title after the element
+    // fired, so the song was keyed under the placeholder. Re-key in place
+    // instead of treating it as a track switch, so Recent doesn't get a
+    // duplicate row.
     if (this.#identity && identity.normalizedUrl === this.#identity.normalizedUrl) {
       const staleKey = this.#identity.key;
       const adjusted = this.#userAdjusted;
@@ -132,9 +131,9 @@ class TrackSync {
       // the stale identity gets another go now the duration has settled.
       if (!adjusted) this.#restoreSaved(identity);
       if (adjusted) {
-        // Housekeeping, not a user deletion: the song stays, only its
-        // stale-keyed twin goes — so no deletion record (which is per song
-        // and would kill the fresh row on the other devices).
+        // Housekeeping, not a user deletion: this is the same song under its
+        // real title, so no tombstone — that names the song, and would kill
+        // its fresh row on the other devices.
         await removeHistoryEntry(staleKey, { record: false });
         await this.#saveCurrent();
         // Only carry the stale key's slice over when the real key has none, so

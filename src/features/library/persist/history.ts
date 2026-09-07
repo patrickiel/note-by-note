@@ -38,24 +38,10 @@ export async function upsertHistory(
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
-  // Matched by song, not by key: this row supersedes every older one for the
-  // same song, so a duration that settled differently can't leave a twin
-  // behind — and a tombstone for the song goes with them, this play being the
-  // newer statement about it.
+  // This row supersedes any older one for the same song — a tombstone for it
+  // included, this play being the newer statement about it.
   const next = [entry, ...list.filter((e) => !isSameTrack(e.identity, identity))];
   await historyItem.setValue(capped(next));
-}
-
-/** Collapse rows written before saves were matched by song (one song split
- * across several durations). The list is newest-first, so the first row for a
- * song wins and the older twins are dropped. */
-export async function dedupeHistory(): Promise<void> {
-  const list = await historyItem.getValue();
-  const kept: HistoryEntry[] = [];
-  for (const entry of list) {
-    if (!kept.some((e) => isSameTrack(e.identity, entry.identity))) kept.push(entry);
-  }
-  if (kept.length !== list.length) await historyItem.setValue(kept);
 }
 
 /** The user removed a row: it stays as a tombstone (`deletions.ts`) so a sync

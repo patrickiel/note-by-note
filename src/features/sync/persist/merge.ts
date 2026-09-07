@@ -1,5 +1,4 @@
 import { HISTORY_LIMIT } from '../../../core/model/defaults.ts';
-import { songKey } from '../../../core/model/track-identity.ts';
 import type { Backup } from '../../../core/persist/backup-codec.ts';
 import { at, isLive, pruneTombstones, type Deletable } from '../../../core/persist/deletions.ts';
 import type { FavoriteEntry, HistoryEntry } from '../../../core/model/types';
@@ -12,13 +11,12 @@ import type { FavoriteEntry, HistoryEntry } from '../../../core/model/types';
  * "removed over there" needs no case of its own, and neither does a re-add —
  * it is simply newer. Ties go to the tombstone.
  *
- *   - Recent rows and favorites: matched by song (URL + title, like the
- *     library itself), so a copy saved under a drifted duration is the same
- *     song. A favorite's last access is the later of the two.
- *   - Track records: matched by key. An emptied record is still a record, so
- *     clearing markers sticks. A chart is chosen separately by `computedAt`:
- *     null may mean "trimmed", but an empty, dated chart is an explicit
- *     deletion and beats older analysis.
+ *   - Recent rows, favorites and track records: all matched on the one key a
+ *     song has (`track-identity.ts`). A favorite's last access is the later of
+ *     the two. An emptied record is still a record, so clearing markers
+ *     sticks; a chart is chosen separately by `computedAt`, since null may
+ *     mean "trimmed" but an empty, dated chart is an explicit deletion and
+ *     beats older analysis.
  *   - Settings and UI prefs: one item each, with one date, taken whole.
  *     EQ presets: union by name.
  *   - Last, the two library copies of a song (Recent and Favorites) are put
@@ -33,7 +31,10 @@ import type { FavoriteEntry, HistoryEntry } from '../../../core/model/types';
  * each. `node --test`.
  */
 
-const song = (entry: HistoryEntry) => songKey(entry.identity);
+/** Every list is keyed the same way, on the one identity a song has
+ * (`track-identity.ts`) — Recent rows, favorites, tombstones and the track
+ * record all answer to it. */
+const song = (entry: { identity: { key: string } }) => entry.identity.key;
 
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
@@ -100,7 +101,7 @@ const rankOf = (f: FavoriteEntry) => f.orderedAt ?? f.favoritedAt ?? at(f);
  * in favorites alone, the list simply stays long. Tombstones are kept whatever
  * the count — they go by age, not by rank. */
 function capHistory(history: HistoryEntry[], favorites: FavoriteEntry[]): HistoryEntry[] {
-  const ordered = [...history].sort(orderOf(at, song));
+  const ordered = [...history].sort(orderOf<HistoryEntry>(at, song));
   const live = ordered.filter(isLive);
   const excess = live.length - HISTORY_LIMIT;
   if (excess <= 0) return ordered;
@@ -163,12 +164,12 @@ export function mergeBackups(local: Backup, remote: Backup, now = Date.now()): B
       .sort((a, b) => compare(a.name, b.name)),
     history: capHistory(history.map(align), favorites),
     favorites: favorites.map(align),
-    tracks: unionNewest(local.tracks, remote.tracks, (t) => t.identity.key, (w, l) => ({
+    tracks: unionNewest(local.tracks, remote.tracks, song, (w, l) => ({
       ...w,
       chordChart:
         !w.chordChart || (l.chordChart?.computedAt ?? 0) > w.chordChart.computedAt
           ? l.chordChart ?? w.chordChart
           : w.chordChart,
-    })).sort((a, b) => compare(a.identity.key, b.identity.key)),
+    })).sort((a, b) => compare(song(a), song(b))),
   };
 }

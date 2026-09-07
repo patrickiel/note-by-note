@@ -284,19 +284,25 @@ test('a tie goes to the tombstone, and both devices break it the same way', () =
   );
 });
 
-test('a deletion reaches every copy of the song, whatever duration it was saved under', () => {
+test('a deletion reaches the song however its duration drifted', () => {
   const url = 'https://www.youtube.com/watch?v=drifted0001';
   const s201 = makeTrackIdentity(url, 'Song', 201);
   const s200 = makeTrackIdentity(url, 'Song', 200);
-  assert.notEqual(s201.key, s200.key);
+  assert.equal(s201.key, s200.key, 'one song, one key — duration is metadata');
   const local = backup({
     history: [tombstone(row(s201, T0), T0 + 5000)],
     favorites: [tombstone(fav(s201, T0), T0 + 5000)],
+    tracks: [{ ...record(s201, T0 + 5000, 0), markers: [] }],
   });
-  const remote = backup({ history: [row(s200, T0)], favorites: [fav(s200, T0)] });
+  const remote = backup({
+    history: [row(s200, T0)],
+    favorites: [fav(s200, T0)],
+    tracks: [record(s200, T0, 3)],
+  });
   const merged = mergeBackups(local, remote, NOW);
   assert.equal(live(merged.history).length, 0);
   assert.equal(live(merged.favorites).length, 0);
+  assert.equal(merged.tracks.length, 1, 'and its record is one record, not two');
   // A different song at the same URL (local files share one) is untouched.
   const other = makeTrackIdentity(url, 'Other song', 200);
   const kept = mergeBackups(local, backup({ history: [row(other, T0)] }), NOW);

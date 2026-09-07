@@ -461,29 +461,24 @@ test('identity: the key is rebuilt from the URL and duration, never stored', () 
   );
 });
 
-test('identity: a key that cannot be rebuilt travels explicitly', () => {
-  const odd = { ...ytSong, key: 'legacy:230' };
-  const b = backup({ history: [entry(odd)] });
-  const enc = encodeBackup(b);
-  assert.equal(enc.songs[0][3], 'legacy:230');
-  assert.equal(roundTrip(b).history[0].identity.key, 'legacy:230');
+test('identity: a key a file carried is read past; the key is derived', () => {
+  // Older files stored a fourth element when the key didn't match the formula
+  // that build used. Every build derives its own key from the same two
+  // strings, which is what lets devices on either side of a key change read
+  // each other's blobs.
+  const enc = JSON.parse(JSON.stringify(encodeBackup(backup({ history: [entry(ytSong)] }))));
+  enc.songs[0][3] = 'legacy:230';
+  assert.equal(decodeBackup(enc).history[0].identity.key, ytSong.key);
 });
 
-test('identity: one song is one row; a duration that drifted is another', () => {
+test('identity: a duration that drifted is the same song', () => {
   const drifted = makeTrackIdentity(YT_HREF, ytSong.title, 231);
-  const b = backup({
-    history: [entry(ytSong)],
-    favorites: [favorite(ytSong)],
-    tracks: [track(ytSong), track(drifted)],
-  });
+  assert.equal(drifted.key, ytSong.key, 'duration is metadata, not identity');
+  const b = backup({ history: [entry(ytSong)], favorites: [favorite(ytSong)], tracks: [track(ytSong)] });
   const enc = encodeBackup(b);
-  assert.equal(enc.songs.length, 2);
+  assert.equal(enc.songs.length, 1, 'one table row for the song');
   assert.equal(enc.h[0].i, enc.f[0].i);
-  const back = roundTrip(b);
-  assert.deepEqual(
-    back.tracks.map((t) => t.identity.key).sort(),
-    [ytSong.key, drifted.key].sort(),
-  );
+  assert.deepEqual(roundTrip(b).tracks.map((t) => t.identity.key), [ytSong.key]);
 });
 
 // ---------------------------------------------------------------------------
