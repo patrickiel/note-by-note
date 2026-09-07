@@ -9,6 +9,7 @@ import {
   mergeDeletions,
   presetDeletion,
   pruneDeletions,
+  REPLACED_ALL,
 } from '../../../core/persist/deletions.ts';
 import type { FavoriteEntry, HistoryEntry } from '../../../core/model/types';
 
@@ -27,6 +28,8 @@ import type { FavoriteEntry, HistoryEntry } from '../../../core/model/types';
  *     an empty, dated chart is an explicit deletion and beats older analysis.
  *   - Settings and UI prefs: the newer device's, as a whole. EQ presets: union
  *     by name, the later save of a shared name, deletions honoured.
+ *   - Last, the two library copies of a song (Recent and Favorites) are put
+ *     back in step: they are written together and read as one.
  *
  * `remoteWins` breaks ties and picks the wholesale sections: true when the
  * remote copy was written after this device's last local change. The winning
@@ -73,6 +76,25 @@ function capHistory(history: HistoryEntry[], favorites: FavoriteEntry[]): Histor
   return ordered.filter((e) => !cut.has(e));
 }
 
+/** Recent and Favorites each hold a copy of the same song's settings and are
+ * written together (`track-sync.#saveCurrent`); `findSavedEntry` and the chips
+ * in the list both take the two to agree. Merged apart they drift — star a song
+ * on one device, practise it unstarred on another, and only Recent hears about
+ * the new settings — so both copies take the newer one's params. Dates are left
+ * alone: this is a function of the merged lists, so every device works out the
+ * same answer from the same pair of copies. */
+function alignParams(history: HistoryEntry[], favorites: FavoriteEntry[]) {
+  const newest = new Map<string, HistoryEntry>();
+  for (const entry of [...history, ...favorites]) {
+    const best = newest.get(song(entry));
+    if (!best || at(entry) > at(best)) newest.set(song(entry), entry);
+  }
+  return <T extends HistoryEntry>(entry: T): T => {
+    const best = newest.get(song(entry));
+    return best && best !== entry ? { ...entry, params: best.params } : entry;
+  };
+}
+
 export function mergeBackups(
   local: Backup,
   remote: Backup,
@@ -82,7 +104,7 @@ export function mergeBackups(
   const [winner, loser] = remoteWins ? [remote, local] : [local, remote];
   const deletions = pruneDeletions(mergeDeletions(local.deletions ?? {}, remote.deletions ?? {}), now);
   const history = unionNewest(winner.history, loser.history, song, (e) =>
-    deletedSince(deletions, at(e), historyDeletion(song(e)), HISTORY_CLEARED),
+    deletedSince(deletions, at(e), historyDeletion(song(e)), HISTORY_CLEARED, REPLACED_ALL),
   );
   const favorites = unionNewest(
     winner.favorites,
@@ -92,12 +114,13 @@ export function mergeBackups(
     // `updatedAt`, which ordinary practice bumps (`touchFavorite` with new
     // params). Taking the later of the two would let a slider nudge on one
     // device outdate the other's unfavorite and re-star the song.
-    (f) => deletedSince(deletions, f.favoritedAt || at(f), favoriteDeletion(song(f))),
+    (f) => deletedSince(deletions, f.favoritedAt || at(f), favoriteDeletion(song(f)), REPLACED_ALL),
     (w, l): FavoriteEntry => ({
       ...w,
       lastAccessedAt: Math.max(w.lastAccessedAt ?? 0, l.lastAccessedAt ?? 0),
     }),
   );
+  const align = alignParams(history, favorites);
   return {
     ...local,
     exportedAt: Math.max(local.exportedAt ?? 0, remote.exportedAt ?? 0),
@@ -107,15 +130,17 @@ export function mergeBackups(
       winner.eqPresets,
       loser.eqPresets,
       (p) => p.name,
-      (p) => deletedSince(deletions, at(p), presetDeletion(p.name)),
+      (p) => deletedSince(deletions, at(p), presetDeletion(p.name), REPLACED_ALL),
     ),
-    history: capHistory(history, favorites),
-    favorites,
+    history: capHistory(history.map(align), favorites),
+    favorites: favorites.map(align),
     tracks: unionNewest(
       winner.tracks,
       loser.tracks,
       (t) => t.identity.key,
-      undefined,
+      // No tombstone of their own (an emptied record is one), but a
+      // replacement import drops markers and snippets too.
+      (t) => deletedSince(deletions, at(t), REPLACED_ALL),
       (w, l) => ({
         ...w,
         chordChart: !w.chordChart || (l.chordChart?.computedAt ?? 0) > w.chordChart.computedAt

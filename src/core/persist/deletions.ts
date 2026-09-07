@@ -7,7 +7,8 @@
  * `updatedAt`, and wins its merge on that.
  *
  * One flat map, `key → when` (ms). Keys: `h:<songKey>` a Recent row,
- * `f:<songKey>` a favorite, `h:*` "Clear Recent", `e:<name>` an EQ preset.
+ * `f:<songKey>` a favorite, `h:*` "Clear Recent", `e:<name>` an EQ preset,
+ * `*` a replacement import (everything older, in every list).
  * Songs are named by `songKey` (URL + title, no duration — see
  * track-identity.ts) so the record reaches every copy of the song, however
  * its duration drifted, exactly like the merge matches them. A record older
@@ -27,6 +28,12 @@ export const historyDeletion = (songKey: string) => `h:${songKey}`;
 export const favoriteDeletion = (songKey: string) => `f:${songKey}`;
 export const presetDeletion = (name: string) => `e:${name}`;
 export const HISTORY_CLEARED = 'h:*';
+/** A replacement import: everything older than this date is gone, in every
+ * list — Recent, favorites, presets and track records alike, which is what the
+ * import prompt promises. One record rather than one per dropped item: the
+ * whole library goes at once, and per-item records would hit `DELETION_CAP`.
+ * `reviveBackup` dates the file's own contents after it, so they survive. */
+export const REPLACED_ALL = '*';
 
 export const DELETION_TTL_MS = 30 * 24 * 60 * 60_000;
 export const DELETION_CAP = 200;

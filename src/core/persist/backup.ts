@@ -5,7 +5,7 @@ import {
   parseBackupJson,
   type Backup,
 } from './backup-codec';
-import { mergeDeletions, pruneDeletions, reviveBackup } from './deletions';
+import { mergeDeletions, pruneDeletions, REPLACED_ALL, reviveBackup } from './deletions';
 import {
   deletionsItem,
   eqPresetsItem,
@@ -84,7 +84,9 @@ export function parseBackup(text: string): Backup {
  * merging into whatever is here. Host permissions are left untouched.
  * Deletion records are the one thing merged, not replaced: forgetting this
  * device's would let a sync merge resurrect what it had removed. Manual file
- * imports use `asNew` to re-add their contents; sync restores keep their dates.
+ * imports use `asNew` to re-add their contents (and to date the removal of
+ * everything the file leaves out, which the other devices would otherwise
+ * union straight back); sync restores keep their dates.
  *
  * Track records are written first and the leftovers removed afterwards, never
  * the other way round. A sync merge calls this on every remote change, and
@@ -94,10 +96,14 @@ export function parseBackup(text: string): Backup {
  * next restore removes.
  */
 export async function restoreBackup(backup: Backup, { asNew = false } = {}): Promise<void> {
-  const deletions = pruneDeletions(
-    mergeDeletions(await deletionsItem.getValue(), backup.deletions ?? {}), Date.now(),
+  const now = Date.now();
+  let deletions = pruneDeletions(
+    mergeDeletions(await deletionsItem.getValue(), backup.deletions ?? {}), now,
   );
-  if (asNew) backup = reviveBackup(backup, deletions);
+  if (asNew) {
+    deletions = { ...deletions, [REPLACED_ALL]: now };
+    backup = reviveBackup(backup, deletions);
+  }
   await Promise.all([
     settingsItem.setValue(backup.settings),
     uiPrefsItem.setValue(backup.uiPrefs),

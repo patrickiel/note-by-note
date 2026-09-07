@@ -8,6 +8,7 @@ import {
   HISTORY_CLEARED,
   historyDeletion,
   presetDeletion,
+  REPLACED_ALL,
   reviveBackup,
 } from '../../../core/persist/deletions.ts';
 import { DEFAULT_PARAMS, DEFAULT_SETTINGS, HISTORY_LIMIT } from '../../../core/model/defaults.ts';
@@ -182,6 +183,25 @@ test('a deleted chart beats stale analysis and later marker edits, but allows re
   }
 });
 
+test('a song’s two library copies come out of a merge with the same settings', () => {
+  const a = song(1);
+  // Starred here at +3; the other device, which hasn’t got the star yet,
+  // practised the song since and left it at 0.
+  const starred: FavoriteEntry = { ...fav(a, T0), params: row(a, T0, 3).params };
+  const local = backup({ favorites: [starred], history: [row(a, T0, 3)] });
+  const remote = backup({ history: [row(a, T0 + 1000, 0)] });
+  for (const remoteWins of [false, true]) {
+    const merged = mergeBackups(local, remote, remoteWins, NOW);
+    assert.equal(merged.history[0].params.transpose, 0);
+    assert.equal(merged.favorites[0].params.transpose, 0, 'the favorite follows the newer row');
+  }
+  // And the other way round, when the favorite is the fresher copy.
+  const practised = backup({ favorites: [{ ...fav(a, T0 + 1000), params: row(a, T0, 3).params }] });
+  const merged = mergeBackups(practised, backup({ history: [row(a, T0, 0)] }), true, NOW);
+  assert.equal(merged.history[0].params.transpose, 3);
+  assert.equal(merged.favorites[0].params.transpose, 3);
+});
+
 test('a manual import re-adds deleted rows and presets without reviving absent items', () => {
   const del = { [HISTORY_CLEARED]: NOW, [favoriteDeletion(songKey(song(1)))]: NOW, [presetDeletion('Mine')]: NOW };
   const file = backup({ history: [row(song(1), T0)], favorites: [fav(song(1), T0)], eqPresets: [{ name: 'Mine', gains: [1] }] });
@@ -194,6 +214,29 @@ test('a manual import re-adds deleted rows and presets without reviving absent i
     assert.equal(merged.eqPresets[0].name, 'Mine');
   }
   assert.equal(file.history[0].updatedAt, T0, 'the original backup is unchanged');
+});
+
+test('a replacement import removes what it leaves out, on the other devices too', () => {
+  const kept = song(1);
+  const dropped = song(2);
+  const file = backup({ history: [row(kept, T0)], tracks: [record(kept, T0, 1)] });
+  const restored = reviveBackup(file, { [REPLACED_ALL]: NOW }, NOW);
+  const remote = backup({
+    history: [row(dropped, T0)],
+    favorites: [fav(dropped, T0)],
+    eqPresets: [{ name: 'Gone', gains: [1] }],
+    tracks: [record(dropped, T0, 3)],
+  });
+  for (const remoteWins of [false, true]) {
+    const merged = mergeBackups(restored, remote, remoteWins, NOW);
+    assert.deepEqual(keys(merged.history), [kept.key], 'only what the file carried');
+    assert.deepEqual(keys(merged.favorites), []);
+    assert.deepEqual(merged.eqPresets, []);
+    assert.deepEqual(keys(merged.tracks), [kept.key]);
+  }
+  // What the other device did *after* the import is not the import's to drop.
+  const later = backup({ history: [row(dropped, NOW + 1)] });
+  assert.equal(mergeBackups(restored, later, true, NOW).history.length, 2);
 });
 
 test('ties go to the winning side', () => {

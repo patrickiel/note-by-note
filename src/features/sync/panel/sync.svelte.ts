@@ -293,7 +293,14 @@ class SyncStore {
 
       // Another device wrote since we last looked.
       const remote = await unpackBackup(base64);
-      const remoteWins = !localChanged || remote.exportedAt > this.config.lastChangedAt;
+      // Purely the clock: the remote copy wins if it was written after this
+      // device's last local change. Not "unless we changed something" — our
+      // own push records `lastLocalHash` as soon as the write resolves, and a
+      // write the browser later replaces (its own conflict resolution, or
+      // another device landing on top) would then read as "we changed
+      // nothing" and let an older copy overwrite the settings we just made.
+      // Losing that race now leaves local ahead, and `needPush` re-uploads.
+      const remoteWins = remote.exportedAt > this.config.lastChangedAt;
       const merged = mergeBackups(local, remote, remoteWins);
       const mergedHash = await contentHash(merged);
       const needApply = mergedHash !== localHash;
@@ -322,12 +329,13 @@ class SyncStore {
 
       if (needApply) {
         // #applying stays set until the reload: nothing in between may
-        // schedule a push of what was just written. The reload is owed from
-        // here on, even if the restore fails halfway.
+        // schedule a push of what was just written. Owed only once the data
+        // is actually in — a restore that keeps failing (quota) would
+        // otherwise reload into the same reconcile, for ever.
         this.#applying = true;
         clearTimeout(this.#timer);
-        applied = true;
         await restoreBackup(merged);
+        applied = true;
       }
       if (needPush) {
         await this.#push(fitted, mergedHash);
@@ -347,7 +355,10 @@ class SyncStore {
     } finally {
       this.#busy--;
       // Local data changed under the stores (same situation as an import).
+      // Nothing written, nothing to reload for: the error is on screen and
+      // this document goes on listening for local changes.
       if (applied) location.reload();
+      else this.#applying = false;
     }
   }
 
