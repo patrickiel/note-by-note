@@ -236,7 +236,7 @@ test('sync: customized settings or prefs count even without a library', () => {
   assert.equal(isEmptyBackup(backup()), true);
   assert.equal(isEmptyBackup(backup({ settings: { ...DEFAULT_SETTINGS, theme: 'dark' } })), false);
   assert.equal(isEmptyBackup(backup({ uiPrefs: { ...DEFAULT_UI_PREFS, boundaryLabels: { start: 'Intro', end: '' } } })), false);
-  assert.equal(isEmptyBackup(backup({ deletions: { 'h:*': Date.now() } })), false);
+  assert.equal(isEmptyBackup(backup({ history: [entry(ytSong, { deleted: true })] })), false);
 });
 
 test('settings: a keymap saved before an action existed is backfilled', () => {
@@ -506,15 +506,56 @@ test('encode is deterministic regardless of track enumeration order', () => {
   assert.deepEqual(encodeBackup(shuffled), encodeBackup(b));
 });
 
-test('deletion records travel in ms and are omitted when empty', () => {
-  assert.equal('del' in encodeBackup(backup()), false);
-  const b = backup({ deletions: { 'h:abc:230': 1_757_112_345_678, 'h:*': 1_757_000_000_000 } });
+test('a tombstone travels as the song and the date, and nothing else', () => {
+  const b = backup({
+    history: [entry(ytSong, { deleted: true, updatedAt: 1_757_112_345_678 })],
+    favorites: [favorite(siteSong, { deleted: true, updatedAt: 1_757_112_345_679 })],
+    eqPresets: [{ name: 'Mine', gains: [3, -2], updatedAt: 1_757_000_000_000, deleted: true }],
+  });
   const enc = encodeBackup(b);
-  assert.deepEqual(enc.del, { 'h:*': 1_757_000_000_000, 'h:abc:230': 1_757_112_345_678 });
-  assert.deepEqual(roundTrip(b).deletions, b.deletions);
-  const v1 = JSON.parse(JSON.stringify(backup()));
-  delete v1.deletions;
-  assert.deepEqual(parseBackupJson(v1).deletions, {});
+  assert.deepEqual(enc.h, [{ i: 0, at: 1_757_112_345_678, x: 1 }], 'params and URLs dropped');
+  assert.equal('p' in enc.f[0], false);
+  assert.deepEqual(enc.eq, [['Mine', [], 1_757_000_000_000, 1]], 'gains dropped');
+
+  const back = roundTrip(b);
+  assert.equal(back.history[0].deleted, true);
+  assert.equal(back.history[0].updatedAt, 1_757_112_345_678);
+  assert.equal(back.favorites[0].deleted, true);
+  assert.deepEqual(back.eqPresets[0], {
+    name: 'Mine',
+    gains: [],
+    updatedAt: 1_757_000_000_000,
+    deleted: true,
+  });
+  // Idempotent like every other rounding: what was stripped stays stripped, so
+  // two devices holding the same tombstone hash the same.
+  assert.deepEqual(encodeBackup(back), enc);
+});
+
+test('settings and prefs carry their own date, outside the diff', () => {
+  const b = backup({
+    settings: { ...DEFAULT_SETTINGS, updatedAt: 1_757_000_000_000 },
+    uiPrefs: { ...DEFAULT_UI_PREFS, updatedAt: 1_757_000_000_001 },
+  });
+  const enc = encodeBackup(b);
+  assert.deepEqual(enc.s, {}, 'the date is not a setting');
+  assert.equal(enc.sat, 1_757_000_000_000);
+  assert.equal(enc.uat, 1_757_000_000_001);
+  assert.equal(isEmptyBackup(b), true, 'a date on the defaults is not data');
+  assert.equal(roundTrip(b).settings.updatedAt, 1_757_000_000_000);
+  assert.equal(roundTrip(b).uiPrefs.updatedAt, 1_757_000_000_001);
+});
+
+test('a version 2 file still reads; its del map is dropped', () => {
+  const v2 = {
+    ...JSON.parse(JSON.stringify(encodeBackup(library(3)))),
+    version: 2,
+    del: { 'h:abc:230': 1_757_112_345_678 },
+  };
+  const back = parseBackupJson(v2);
+  assert.equal(back.history.length, 3);
+  assert.equal(back.history.some((e) => e.deleted), false);
+  assert.equal('deletions' in back, false);
 });
 
 test('exportedAt is kept; appVersion is dropped', () => {
@@ -536,11 +577,12 @@ test('a verbose v1 file still parses and is backfilled', () => {
   assert.equal(back.appVersion, '1.0.3');
 });
 
-test('a v2 file routes through the codec; anything newer or foreign is refused', () => {
-  const v2 = JSON.parse(JSON.stringify(encodeBackup(library(2))));
-  assert.equal(parseBackupJson(v2).history.length, 2);
-  assert.throws(() => parseBackupJson({ ...v2, version: 3 }), /newer version/);
-  assert.throws(() => parseBackupJson({ ...v2, format: 'other' }), /isn't a Note by Note backup/);
+test('a compact file routes through the codec; anything newer or foreign is refused', () => {
+  const compact = JSON.parse(JSON.stringify(encodeBackup(library(2))));
+  assert.equal(parseBackupJson(compact).history.length, 2);
+  assert.equal(parseBackupJson({ ...compact, version: 2 }).history.length, 2, 'v2 too');
+  assert.throws(() => parseBackupJson({ ...compact, version: COMPACT_VERSION + 1 }), /newer version/);
+  assert.throws(() => parseBackupJson({ ...compact, format: 'other' }), /isn't a Note by Note backup/);
   assert.throws(() => parseBackupJson('nope'), /isn't a Note by Note backup/);
   assert.throws(
     () => parseBackupJson({ format: BACKUP_FORMAT, version: 1, settings: {} }),

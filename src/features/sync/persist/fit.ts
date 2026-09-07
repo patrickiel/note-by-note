@@ -1,5 +1,6 @@
 import { songKey } from '../../../core/model/track-identity.ts';
 import type { Backup } from '../../../core/persist/backup-codec.ts';
+import { isLive } from '../../../core/persist/deletions.ts';
 import type { HistoryEntry, TrackData, TrackIdentity } from '../../../core/model/types';
 
 /**
@@ -14,7 +15,9 @@ import type { HistoryEntry, TrackData, TrackIdentity } from '../../../core/model
  *   2. chord charts, by when they were computed (they can be re-analyzed);
  *   3. favorites, with their Recent row and track record, by last access.
  *
- * Each group oldest first. Settings, UI prefs and EQ presets are never cut.
+ * Each group oldest first. Settings, UI prefs, EQ presets and tombstones
+ * (`deletions.ts`) are never cut — a dropped tombstone is a row another
+ * device brings straight back, and they are a handful of bytes each.
  * Songs are matched the way the library does (`songKey`: URL + title), so a
  * record saved under a drifted duration still follows its favorite.
  *
@@ -55,17 +58,17 @@ const oldestFirst = (a: Cut, b: Cut) =>
 
 /** Everything that may go, in the order it goes. */
 function collectCuts(backup: Backup): Cut[] {
-  const favorites = new Set(backup.favorites.map((f) => songKey(f.identity)));
+  const favorites = new Set(backup.favorites.filter(isLive).map((f) => songKey(f.identity)));
   const songs = new Map<string, number>();
   const touch = (identity: TrackIdentity, at: number) => {
     const id = songKey(identity);
     if (!favorites.has(id)) songs.set(id, Math.max(songs.get(id) ?? 0, at));
   };
-  for (const entry of backup.history) touch(entry.identity, entry.updatedAt ?? 0);
+  for (const entry of backup.history.filter(isLive)) touch(entry.identity, entry.updatedAt ?? 0);
   for (const track of backup.tracks) touch(track.identity, track.updatedAt ?? 0);
 
   const accessed = new Map<string, number>();
-  for (const f of backup.favorites) {
+  for (const f of backup.favorites.filter(isLive)) {
     const id = songKey(f.identity);
     const at = f.lastAccessedAt ?? f.updatedAt ?? 0;
     accessed.set(id, Math.max(accessed.get(id) ?? 0, at));
@@ -83,7 +86,8 @@ function collectCuts(backup: Backup): Cut[] {
 function apply(backup: Backup, cuts: Cut[]): Backup {
   const songs = new Set(cuts.filter((c) => c.kind === 'song').map((c) => c.id));
   const charts = new Set(cuts.filter((c) => c.kind === 'chart').map((c) => c.id));
-  const keep = (row: HistoryEntry | TrackData) => !songs.has(songKey(row.identity));
+  const keep = (row: HistoryEntry | TrackData) =>
+    !isLive(row) || !songs.has(songKey(row.identity));
   return {
     ...backup,
     history: backup.history.filter(keep),

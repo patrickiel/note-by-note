@@ -39,7 +39,10 @@ class SettingsStore {
   }
 
   async update(patch: Partial<Settings>) {
-    const next = { ...this.current, ...patch };
+    // Dated on every write: settings cross devices as one item with one date
+    // (`merge.ts`), so the later change wins without either device having to
+    // consult its own clock about the other's.
+    const next = { ...this.current, ...patch, updatedAt: Date.now() };
     // Auto Reset and Remember settings are alternatives — enabling one
     // switches the other off.
     if (patch.rememberSettings) next.autoReset = false;
@@ -59,7 +62,7 @@ class SettingsStore {
   }
 
   async reset() {
-    this.current = structuredClone(DEFAULT_SETTINGS);
+    this.current = { ...structuredClone(DEFAULT_SETTINGS), updatedAt: Date.now() };
     this.onChange?.(this.current);
     await settingsItem.setValue($state.snapshot(this.current) as Settings);
   }
@@ -85,7 +88,8 @@ class UiPrefsStore {
   async #save() {
     this.#writing = true;
     try {
-      await uiPrefsItem.setValue($state.snapshot(this.current));
+      // Dated like Settings above — see `merge.ts`.
+      await uiPrefsItem.setValue({ ...$state.snapshot(this.current), updatedAt: Date.now() });
     } finally {
       this.#writing = false;
     }

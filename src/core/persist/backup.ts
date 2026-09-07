@@ -5,9 +5,8 @@ import {
   parseBackupJson,
   type Backup,
 } from './backup-codec';
-import { mergeDeletions, pruneDeletions, REPLACED_ALL, reviveBackup } from './deletions';
+import { pruneTombstones, replaceAll } from './deletions';
 import {
-  deletionsItem,
   eqPresetsItem,
   favoritesItem,
   historyItem,
@@ -30,7 +29,7 @@ async function loadAllTrackData(): Promise<TrackData[]> {
 }
 
 export async function createBackup(): Promise<Backup> {
-  const [settings, uiPrefs, history, favorites, eqPresets, tracks, deletions] =
+  const [settings, uiPrefs, history, favorites, eqPresets, tracks] =
     await Promise.all([
       settingsItem.getValue(),
       uiPrefsItem.getValue(),
@@ -38,7 +37,6 @@ export async function createBackup(): Promise<Backup> {
       favoritesItem.getValue(),
       eqPresetsItem.getValue(),
       loadAllTrackData(),
-      deletionsItem.getValue(),
     ]);
   return {
     format: BACKUP_FORMAT,
@@ -51,7 +49,6 @@ export async function createBackup(): Promise<Backup> {
     favorites,
     eqPresets,
     tracks,
-    deletions,
   };
 }
 
@@ -82,11 +79,12 @@ export function parseBackup(text: string): Backup {
  * Replaces every stored value with the backup's, dropping data the file does
  * not carry — a restore reproduces the machine it came from rather than
  * merging into whatever is here. Host permissions are left untouched.
- * Deletion records are the one thing merged, not replaced: forgetting this
- * device's would let a sync merge resurrect what it had removed. Manual file
- * imports use `asNew` to re-add their contents (and to date the removal of
- * everything the file leaves out, which the other devices would otherwise
- * union straight back); sync restores keep their dates.
+ *
+ * A manual file import passes `asNew`, which turns the file into "this is the
+ * library now": its rows are re-dated and everything this device held that the
+ * file leaves out becomes a tombstone, so a sync merge can't union it straight
+ * back (`replaceAll`, deletions.ts). A sync restore is already a merged result
+ * and keeps its dates. Expired tombstones are dropped on the way past.
  *
  * Track records are written first and the leftovers removed afterwards, never
  * the other way round. A sync merge calls this on every remote change, and
@@ -97,21 +95,14 @@ export function parseBackup(text: string): Backup {
  */
 export async function restoreBackup(backup: Backup, { asNew = false } = {}): Promise<void> {
   const now = Date.now();
-  let deletions = pruneDeletions(
-    mergeDeletions(await deletionsItem.getValue(), backup.deletions ?? {}), now,
-  );
-  if (asNew) {
-    deletions = { ...deletions, [REPLACED_ALL]: now };
-    backup = reviveBackup(backup, deletions);
-  }
+  const next = asNew ? replaceAll(backup, await createBackup(), now) : backup;
   await Promise.all([
-    settingsItem.setValue(backup.settings),
-    uiPrefsItem.setValue(backup.uiPrefs),
-    historyItem.setValue(backup.history),
-    favoritesItem.setValue(backup.favorites),
-    eqPresetsItem.setValue(backup.eqPresets),
-    deletionsItem.setValue(deletions),
-    ...backup.tracks.map(saveTrackData),
+    settingsItem.setValue(next.settings),
+    uiPrefsItem.setValue(next.uiPrefs),
+    historyItem.setValue(pruneTombstones(next.history, now)),
+    favoritesItem.setValue(pruneTombstones(next.favorites, now)),
+    eqPresetsItem.setValue(pruneTombstones(next.eqPresets, now)),
+    ...next.tracks.map(saveTrackData),
   ]);
-  await removeTrackDataExcept(new Set(backup.tracks.map((t) => t.identity.key)));
+  await removeTrackDataExcept(new Set(next.tracks.map((t) => t.identity.key)));
 }

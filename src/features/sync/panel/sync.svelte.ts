@@ -48,7 +48,7 @@ const SAFETY_INTERVAL_MS = 5 * 60_000;
 
 /** Raw storage keys (no `local:` prefix in change events) that belong to the
  * backup. `syncConfig` itself is deliberately absent. */
-const SYNCED_KEY_RE = /^(settings|uiPrefs|history|favorites|eqPresets|deletions|track:)/;
+const SYNCED_KEY_RE = /^(settings|uiPrefs|history|favorites|eqPresets|track:)/;
 
 const measure = (backup: Backup) => packedChars(encodeBackup(backup));
 const fit = (backup: Backup) => fitBackup(backup, BUDGET_CHARS, measure);
@@ -118,7 +118,7 @@ class SyncStore {
       if (!Object.keys(changes).some((key) => SYNCED_KEY_RE.test(key))) return;
       // Persisted immediately (not on the debounce) so a panel closed
       // mid-burst still knows there is unpushed data next time it opens.
-      void this.#saveConfig({ pendingPush: true, lastChangedAt: Date.now() });
+      void this.#saveConfig({ pendingPush: true });
       this.#reconcileIn(PUSH_DEBOUNCE_MS);
     });
     onSyncAreaChanged(() => {
@@ -291,17 +291,12 @@ class SyncStore {
         return;
       }
 
-      // Another device wrote since we last looked.
+      // Another device wrote since we last looked. The merge asks this
+      // device nothing about itself — it is a function of the two copies
+      // alone (`merge.ts`), so the other device computes the same result and
+      // the two cannot end up pushing rival answers at each other.
       const remote = await unpackBackup(base64);
-      // Purely the clock: the remote copy wins if it was written after this
-      // device's last local change. Not "unless we changed something" — our
-      // own push records `lastLocalHash` as soon as the write resolves, and a
-      // write the browser later replaces (its own conflict resolution, or
-      // another device landing on top) would then read as "we changed
-      // nothing" and let an older copy overwrite the settings we just made.
-      // Losing that race now leaves local ahead, and `needPush` re-uploads.
-      const remoteWins = remote.exportedAt > this.config.lastChangedAt;
-      const merged = mergeBackups(local, remote, remoteWins);
+      const merged = mergeBackups(local, remote);
       const mergedHash = await contentHash(merged);
       const needApply = mergedHash !== localHash;
 

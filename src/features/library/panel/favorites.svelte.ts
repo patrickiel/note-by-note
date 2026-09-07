@@ -5,6 +5,7 @@ import {
   setFavoritesOrder,
 } from '../persist/favorites';
 import { isSameTrack } from '../../../core/model/track-identity';
+import { isLive } from '../../../core/persist/deletions';
 import { favoritesItem } from '../../../core/persist/storage';
 
 /** Every write below is fired from a click handler as a floating promise, and
@@ -19,12 +20,14 @@ async function write(what: string, run: () => Promise<void>): Promise<void> {
 }
 
 class FavoritesStore {
+  /** Live rows only — the stored list also carries unstar tombstones
+   * (`deletions.ts`). */
   entries = $state<FavoriteEntry[]>([]);
 
   async init() {
-    this.entries = await favoritesItem.getValue();
+    this.entries = (await favoritesItem.getValue()).filter(isLive);
     favoritesItem.watch((value) => {
-      this.entries = value ?? [];
+      this.entries = (value ?? []).filter(isLive);
     });
   }
 

@@ -1,6 +1,7 @@
 import { BUILTIN_EQ_PRESETS, EQ_BANDS } from '../../../core/model/defaults';
 import type { EqPreset } from '../../../core/model/types';
 import { deleteEqPreset, saveEqPreset } from '../persist/eq-presets';
+import { isLive } from '../../../core/persist/deletions';
 import { eqPresetsItem } from '../../../core/persist/storage';
 
 /** Slider gains are multiples of 0.5 dB, so anything closer than this is the
@@ -8,12 +9,14 @@ import { eqPresetsItem } from '../../../core/persist/storage';
 const GAIN_EPSILON = 0.01;
 
 class EqPresetsStore {
+  /** Live presets only — the stored list also carries deletion tombstones
+   * (`deletions.ts`). */
   saved = $state<EqPreset[]>([]);
 
   async init() {
-    this.saved = await eqPresetsItem.getValue();
+    this.saved = (await eqPresetsItem.getValue()).filter(isLive);
     eqPresetsItem.watch((value) => {
-      this.saved = value ?? [];
+      this.saved = (value ?? []).filter(isLive);
     });
   }
 

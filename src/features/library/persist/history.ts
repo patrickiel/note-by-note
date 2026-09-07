@@ -1,8 +1,17 @@
 import { HISTORY_LIMIT } from '../../../core/model/defaults';
-import type { EffectParams, HistoryEntry, TrackIdentity } from '../../../core/model/types';
-import { isSameTrack, songKey } from '../../../core/model/track-identity';
-import { HISTORY_CLEARED, historyDeletion } from '../../../core/persist/deletions';
-import { historyItem, recordDeletion } from '../../../core/persist/storage';
+import type { HistoryEntry, EffectParams, TrackIdentity } from '../../../core/model/types';
+import { isSameTrack } from '../../../core/model/track-identity';
+import { isLive, tombstone } from '../../../core/persist/deletions';
+import { historyItem } from '../../../core/persist/storage';
+
+/** Newest first, with the live rows capped at `HISTORY_LIMIT`. Tombstones
+ * (`deletions.ts`) are kept whatever the count — they are pruned by age, cost
+ * a few bytes each, and dropping one on a full list would let another device's
+ * older copy bring the row back. */
+function capped(list: HistoryEntry[]): HistoryEntry[] {
+  let live = 0;
+  return list.filter((entry) => !isLive(entry) || ++live <= HISTORY_LIMIT);
+}
 
 /** Insert or refresh a Recent entry (newest first, LRU-capped).
  *
@@ -19,7 +28,7 @@ export async function upsertHistory(
 ): Promise<void> {
   const list = await historyItem.getValue();
   const now = Date.now();
-  const existing = list.find((e) => isSameTrack(e.identity, identity));
+  const existing = list.find((e) => isLive(e) && isSameTrack(e.identity, identity));
   if (!existing && onlyExisting) return;
   const entry = {
     identity,
@@ -30,9 +39,11 @@ export async function upsertHistory(
     updatedAt: now,
   };
   // Matched by song, not by key: this row supersedes every older one for the
-  // same song, so a duration that settled differently can't leave a twin behind.
+  // same song, so a duration that settled differently can't leave a twin
+  // behind — and a tombstone for the song goes with them, this play being the
+  // newer statement about it.
   const next = [entry, ...list.filter((e) => !isSameTrack(e.identity, identity))];
-  await historyItem.setValue(next.slice(0, HISTORY_LIMIT));
+  await historyItem.setValue(capped(next));
 }
 
 /** Collapse rows written before saves were matched by song (one song split
@@ -47,22 +58,25 @@ export async function dedupeHistory(): Promise<void> {
   if (kept.length !== list.length) await historyItem.setValue(kept);
 }
 
-/** The user removed a row: dated (`deletions.ts`, by song — every copy of it
- * on every device, whatever duration it was saved under) so a sync merge with
- * another device's older copy doesn't bring it back. `record: false` is for
- * housekeeping that drops a stale twin of a song that stays — recording that
- * would kill the song's fresh row on the other devices. */
+/** The user removed a row: it stays as a tombstone (`deletions.ts`) so a sync
+ * merge with another device's older copy doesn't bring it back, and moves to
+ * the front to keep the list newest-first. `record: false` is for housekeeping
+ * that drops a stale twin of a song that stays — a tombstone there would name
+ * the song, and kill its fresh row on the other devices. */
 export async function removeHistoryEntry(
   key: string,
   { record = true }: { record?: boolean } = {},
 ): Promise<void> {
   const list = await historyItem.getValue();
   const entry = list.find((e) => e.identity.key === key);
-  await historyItem.setValue(list.filter((e) => e.identity.key !== key));
-  if (record && entry) await recordDeletion(historyDeletion(songKey(entry.identity)));
+  const rest = list.filter((e) => e.identity.key !== key);
+  await historyItem.setValue(
+    record && entry ? [tombstone(entry, Date.now()), ...rest] : rest,
+  );
 }
 
 export async function clearHistory(): Promise<void> {
-  await historyItem.setValue([]);
-  await recordDeletion(HISTORY_CLEARED);
+  const list = await historyItem.getValue();
+  const now = Date.now();
+  await historyItem.setValue(list.map((e) => (isLive(e) ? tombstone(e, now) : e)));
 }

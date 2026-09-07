@@ -13,7 +13,6 @@ export function backupFixture(patch: Partial<Backup> = {}): Backup {
     favorites: [],
     eqPresets: [],
     tracks: [],
-    deletions: {},
     ...patch,
   };
 }

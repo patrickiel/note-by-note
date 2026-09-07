@@ -5,7 +5,6 @@ import {
 } from '../model/defaults.ts';
 import { youtubeThumbnailUrl } from '../model/thumbnail.ts';
 import { identityKey } from '../model/track-identity.ts';
-import { normalizeDeletions, type Deletions } from './deletions.ts';
 import type {
   ChordChart,
   ChordSegment,
@@ -53,8 +52,17 @@ export const BACKUP_FORMAT = 'note-by-note-backup';
  * before the compact format. Still accepted on import. */
 export const BACKUP_VERSION = 1;
 
-/** The compact shape below. `parseBackupJson` rejects anything newer. */
-export const COMPACT_VERSION = 2;
+/** The compact shape below. `parseBackupJson` rejects anything newer.
+ *
+ * 3 added tombstones (`x`) to Recent, Favorites and the EQ presets, the
+ * favorites' `orderedAt` (`oa`) and the settings/prefs dates (`sat`/`uat`),
+ * and dropped the `del` map that 2 carried. A 2 file still reads — it simply
+ * has no tombstones, and its `del` records are not translatable (a deletion
+ * key names a song by hash, and a tombstone has to *be* the row). */
+export const COMPACT_VERSION = 3;
+
+/** The oldest compact shape still readable. */
+export const COMPACT_MIN_VERSION = 2;
 
 /** Everything a user owns, in one file. Host permissions are deliberately out:
  * they live in the browser's permission store, and only a prompt can grant
@@ -71,9 +79,6 @@ export interface Backup {
   eqPresets: EqPreset[];
   /** Per-track markers and snippets, one entry per saved track. */
   tracks: TrackData[];
-  /** What was deleted and when — see `deletions.ts`. Absent in files from
-   * before sync merged; `{}` then. */
-  deletions: Deletions;
 }
 
 // ---------------------------------------------------------------------------
@@ -124,6 +129,9 @@ export interface CompactEntry {
   url?: string;
   /** thumbnailUrl, when not derivable from the page URL. */
   th?: string;
+  /** A tombstone (`deletions.ts`): the row was removed at `at`. Nothing else
+   * is carried — a deletion is a song and a date. */
+  x?: 1;
 }
 
 export interface CompactFavorite extends CompactEntry {
@@ -131,10 +139,16 @@ export interface CompactFavorite extends CompactEntry {
   fa: number;
   /** lastAccessedAt, ms. */
   la: number;
+  /** orderedAt, ms; omitted when the row predates manual order syncing. */
+  oa?: number;
 }
 
-/** `[name, gains, updatedAt?]`. */
-export type CompactEqPreset = [string, number[]] | [string, number[], number];
+/** `[name, gains, updatedAt?]`, or `[name, [], updatedAt, 1]` for a tombstone
+ * (`deletions.ts`). */
+export type CompactEqPreset =
+  | [string, number[]]
+  | [string, number[], number]
+  | [string, number[], number, 1];
 
 /** `[t_ms, label?]` — label omitted when empty. */
 export type CompactMarker = [number] | [number, string];
@@ -194,14 +208,16 @@ export interface CompactBackup {
   s: Record<string, unknown>;
   /** UI prefs that differ from the defaults. */
   u: Record<string, unknown>;
+  /** settings.updatedAt, ms; omitted when never dated. */
+  sat?: number;
+  /** uiPrefs.updatedAt, ms; omitted when never dated. */
+  uat?: number;
   /** `[name, gains, updatedAt?]` per saved EQ preset. */
   eq: CompactEqPreset[];
   songs: CompactSong[];
   h: CompactEntry[];
   f: CompactFavorite[];
   t: CompactTrack[];
-  /** Deletion records (ms); omitted when there are none. */
-  del?: Record<string, number>;
 }
 
 // ---------------------------------------------------------------------------
@@ -359,6 +375,9 @@ export function decodeParams(raw: unknown, section: string): EffectParams {
 
 export function encodeSettings(settings: Settings): Record<string, unknown> {
   const { lastUsedParams, ...rest } = settings;
+  // Not a setting: the date rides beside the diff (`sat`), so a device that
+  // changed a setting and changed it back still encodes as empty.
+  delete (rest as { updatedAt?: number }).updatedAt;
   const out = diffPlain(rest, { ...DEFAULT_SETTINGS });
   if (lastUsedParams) out.lp = encodeParams(lastUsedParams) ?? {};
   return out;
@@ -373,8 +392,10 @@ export function decodeSettings(raw: unknown): Settings {
 }
 
 export function encodeUiPrefs(uiPrefs: UiPrefs): Record<string, unknown> {
+  const rest = { ...uiPrefs };
+  delete rest.updatedAt;
   return diffPlain(
-    uiPrefs as unknown as Record<string, unknown>,
+    rest as unknown as Record<string, unknown>,
     DEFAULT_UI_PREFS as unknown as Record<string, unknown>,
   );
 }
@@ -468,6 +489,9 @@ function songAt(songs: TrackIdentity[], index: unknown, section: string): TrackI
 
 function encodeEntry(entry: HistoryEntry, songs: SongTable): CompactEntry {
   const out: CompactEntry = { i: songs.add(entry.identity), at: stamp(entry.updatedAt) };
+  // A tombstone is the song and the date it went; the rest was only ever there
+  // to be shown, and nothing shows a removed row.
+  if (entry.deleted) return { ...out, x: 1 };
   const params = encodeParams(entry.params ?? DEFAULT_PARAMS);
   if (params) out.p = params;
   const pageUrl = entry.pageUrl ?? '';
@@ -492,24 +516,29 @@ function decodeEntry(raw: unknown, songs: TrackIdentity[], section: string): His
     updatedAt,
   };
   if (thumbnailUrl !== undefined) entry.thumbnailUrl = thumbnailUrl;
+  if (c.x === 1) entry.deleted = true;
   return entry;
 }
 
 function encodeFavorite(entry: FavoriteEntry, songs: SongTable): CompactFavorite {
-  return {
+  const out: CompactFavorite = {
     ...encodeEntry(entry, songs),
     fa: stamp(entry.favoritedAt),
     la: stamp(entry.lastAccessedAt),
   };
+  if (entry.orderedAt) out.oa = stamp(entry.orderedAt);
+  return out;
 }
 
 function decodeFavorite(raw: unknown, songs: TrackIdentity[]): FavoriteEntry {
   const c = rec(raw, 'favorites');
-  return {
+  const favorite: FavoriteEntry = {
     ...decodeEntry(c, songs, 'favorites'),
     favoritedAt: num(c.fa, 'favorites'),
     lastAccessedAt: num(c.la, 'favorites'),
   };
+  if (c.oa !== undefined) favorite.orderedAt = num(c.oa, 'favorites');
+  return favorite;
 }
 
 // ---------------------------------------------------------------------------
@@ -697,21 +726,23 @@ function decodeTrack(raw: unknown, songs: TrackIdentity[]): TrackData {
 // ---------------------------------------------------------------------------
 // Whole backup
 
-/** `[name, gains, updatedAt?]`. */
+/** `[name, gains, updatedAt?]`, or `[name, [], updatedAt, 1]` tombstoned. */
 function encodeEqPreset(preset: EqPreset): CompactEqPreset {
   const name = preset.name ?? '';
+  if (preset.deleted) return [name, [], stamp(preset.updatedAt ?? 0), 1];
   const gains = (preset.gains ?? []).map(round2);
   return preset.updatedAt ? [name, gains, stamp(preset.updatedAt)] : [name, gains];
 }
 
 function decodeEqPreset(raw: unknown): EqPreset {
   const r = arr(raw, 'eqPresets');
-  if (r.length < 2 || r.length > 3) throw damaged('eqPresets');
+  if (r.length < 2 || r.length > 4) throw damaged('eqPresets');
   const preset: EqPreset = {
     name: str(r[0], 'eqPresets'),
     gains: arr(r[1], 'eqPresets').map((g) => num(g, 'eqPresets')),
   };
-  if (r.length === 3) preset.updatedAt = num(r[2], 'eqPresets');
+  if (r.length >= 3) preset.updatedAt = num(r[2], 'eqPresets');
+  if (r.length === 4) preset.deleted = true;
   return preset;
 }
 
@@ -738,39 +769,46 @@ export function encodeBackup(backup: Backup): CompactBackup {
     f,
     t,
   };
-  const deletions = Object.entries(normalizeDeletions(backup.deletions)).sort(([a], [b]) =>
-    a < b ? -1 : a > b ? 1 : 0,
-  );
-  if (deletions.length) out.del = Object.fromEntries(deletions.map(([k, when]) => [k, stamp(when)]));
+  if (backup.settings.updatedAt) out.sat = stamp(backup.settings.updatedAt);
+  if (backup.uiPrefs.updatedAt) out.uat = stamp(backup.uiPrefs.updatedAt);
   return out;
 }
 
-/** Defaults alone need no sync blob; customized settings do, even without songs. */
+/** Defaults alone need no sync blob; customized settings do, even without
+ * songs. A tombstone counts as a song — it is the only record that the row
+ * was removed, and seeding without it would resurrect the row elsewhere. */
 export function isEmptyBackup(backup: Backup): boolean {
-  const { songs, eq, s, u, del = {} } = encodeBackup(backup);
+  const { songs, eq, s, u } = encodeBackup(backup);
   return songs.length === 0 && eq.length === 0 &&
-    Object.keys(s).length === 0 && Object.keys(u).length === 0 && Object.keys(del).length === 0;
+    Object.keys(s).length === 0 && Object.keys(u).length === 0;
 }
 
 /** Reads a compact (v2) backup, or throws an `Error` whose message is safe to
  * show the user. Unknown keys are ignored so the format can grow. */
 export function decodeBackup(raw: unknown): Backup {
-  if (!isRecord(raw) || raw.format !== BACKUP_FORMAT || raw.version !== COMPACT_VERSION) {
+  const version = isRecord(raw) && typeof raw.version === 'number' ? raw.version : 0;
+  if (
+    !isRecord(raw) || raw.format !== BACKUP_FORMAT ||
+    version < COMPACT_MIN_VERSION || version > COMPACT_VERSION
+  ) {
     throw new Error("That file isn't a Note by Note backup.");
   }
   const songs = decodeSongs(raw.songs);
+  const settings = decodeSettings(raw.s);
+  const uiPrefs = decodeUiPrefs(raw.u);
+  if (typeof raw.sat === 'number' && Number.isFinite(raw.sat)) settings.updatedAt = raw.sat;
+  if (typeof raw.uat === 'number' && Number.isFinite(raw.uat)) uiPrefs.updatedAt = raw.uat;
   return {
     format: BACKUP_FORMAT,
     version: COMPACT_VERSION,
     exportedAt: typeof raw.at === 'number' && Number.isFinite(raw.at) ? raw.at : 0,
     appVersion: '',
-    settings: decodeSettings(raw.s),
-    uiPrefs: decodeUiPrefs(raw.u),
+    settings,
+    uiPrefs,
     history: arr(raw.h, 'history').map((e) => decodeEntry(e, songs, 'history')),
     favorites: arr(raw.f, 'favorites').map((e) => decodeFavorite(e, songs)),
     eqPresets: arr(raw.eq, 'eqPresets').map(decodeEqPreset),
     tracks: arr(raw.t, 'tracks').map((t) => decodeTrack(t, songs)),
-    deletions: normalizeDeletions(raw.del),
   };
 }
 
@@ -795,7 +833,6 @@ function normalizeV1(raw: Record<string, unknown>): Backup {
     favorites: keyedArr<FavoriteEntry>(raw.favorites, 'favorites'),
     eqPresets: arr(raw.eqPresets, 'eqPresets') as EqPreset[],
     tracks: keyedArr<TrackData>(raw.tracks, 'tracks'),
-    deletions: normalizeDeletions(raw.deletions),
   };
 }
 
@@ -810,5 +847,5 @@ export function parseBackupJson(raw: unknown): Backup {
   if (typeof raw.version !== 'number' || raw.version > COMPACT_VERSION) {
     throw new Error('That backup was made by a newer version of Note by Note.');
   }
-  return raw.version === COMPACT_VERSION ? decodeBackup(raw) : normalizeV1(raw);
+  return raw.version >= COMPACT_MIN_VERSION ? decodeBackup(raw) : normalizeV1(raw);
 }

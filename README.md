@@ -187,10 +187,12 @@ charts, stay on the device that has them ([fit.ts](src/features/sync/persist/fit
 
 Two devices' copies are merged rather than overwritten
 ([merge.ts](src/features/sync/persist/merge.ts)): the more recently edited
-version of each song wins, and a song you removed on one device stays removed
-(deletions are dated, [deletions.ts](src/core/persist/deletions.ts)). Sync is
-on by default; `Settings → Sync` turns it off, and `Delete synced data` empties
-the synced copy.
+version of each song wins, and a song you removed on one device stays removed —
+a removal is kept as a dated, empty row rather than a gap, so a merge can tell
+it from "never had it" ([deletions.ts](src/core/persist/deletions.ts)). The
+merge reads nothing but the two copies, so both devices work out the same
+answer. Sync is on by default; `Settings → Sync` turns it off, and `Delete
+synced data` empties the synced copy.
 
 ## License
 

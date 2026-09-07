@@ -8,9 +8,6 @@ export interface SyncConfig {
   /** When this device was last in agreement with the synced copy — a push, a
    * merge, or a reconcile that found nothing to do; 0 = never synced. */
   lastSyncedAt: number;
-  /** Wall clock of the last local data change — this device's side of
-   * "whose settings win" against a remote blob's clock. */
-  lastChangedAt: number;
   /** `meta.h` of the blob this device last reconciled with. The same hash on
    * the next read means nothing new arrived (our own write echo included). */
   lastRemoteHash: string | null;
@@ -28,7 +25,6 @@ export interface SyncConfig {
 export const DEFAULT_SYNC_CONFIG: SyncConfig = {
   enabled: true,
   lastSyncedAt: 0,
-  lastChangedAt: 0,
   lastRemoteHash: null,
   lastLocalHash: null,
   pendingPush: false,

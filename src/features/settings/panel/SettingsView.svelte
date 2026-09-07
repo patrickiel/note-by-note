@@ -167,7 +167,11 @@
       const backup = parseBackup(await file.text());
       const ok = confirm(
         'Replace all settings, history, favorites, presets, markers and snippets ' +
-          'with the contents of this file? Your current data is lost.',
+          'with the contents of this file? Your current data is lost.' +
+          // The import records what it drops (`deletions.ts`), and those
+          // records travel — so with sync on this is not only about this
+          // device, and the prompt has to say so.
+          (sync.enabled ? ' Your other synced devices lose the same songs.' : ''),
       );
       if (!ok) return;
       await restoreBackup(backup, { asNew: true });
