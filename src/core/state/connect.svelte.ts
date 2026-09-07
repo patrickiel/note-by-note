@@ -102,7 +102,7 @@ class ConnectionManager {
 
     if (isRestricted(tab.url) && !isLocalPlayer(tab.url)) {
       session.connection = 'restricted';
-      session.setMedia(null);
+      session.media = null;
       return;
     }
 
@@ -120,7 +120,7 @@ class ConnectionManager {
       if (!granted) {
         this.needsPermission = pattern;
         session.connection = 'idle';
-        session.setMedia(null);
+        session.media = null;
         return;
       }
       this.needsPermission = null;

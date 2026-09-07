@@ -23,8 +23,7 @@
   // ?mock=1&play=1 also runs the playhead, for previewing time-driven UI.
   const mockPlay = mock && params.has('play');
   // Feature stores load projections from the background-owned library.
-  const loadFeatures = () => Promise.all(features.map((f) => f.init?.()));
-  const ready = loadFeatures().then(
+  const ready = Promise.all(features.map((f) => f.init?.())).then(
     async () => {
       applyTheme(settings.current.theme);
       trackSync.init();
@@ -45,7 +44,7 @@
         };
       }
       installShortcuts();
-      // Fire-and-forget: opening the panel must not wait on the network.
+      // Fire-and-forget: opening the panel must not wait on storage.
       void sync.init();
       if (mock) {
         installMockState();

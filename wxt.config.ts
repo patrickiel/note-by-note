@@ -103,10 +103,10 @@ export default defineConfig({
               // `data_collection_permissions` only in 140 — which is also the
               // current ESR line, so nothing supported is left behind.
               strict_min_version: '140.0',
-              // Sync ships Recent/Favorites off the device (through Firefox
-              // Sync's own storage — no server of ours), and those carry the
-              // page URL, title and thumbnail of every track practised — AMO
-              // counts that as browsing activity. `required` rather than
+              // Sync ships saved songs and Favorites off the device (through
+              // Firefox Sync's own storage — no server of ours), and those carry
+              // the page URL, title and thumbnail of every track practised — AMO
+              // counts that as browsing activity. (Recent stays on the device.) `required` rather than
               // `optional` because sync is on out of the box
               // (DEFAULT_SYNC_CONFIG.enabled), and a manifest claim that
               // contradicts the submission form is a rejection. Nothing else is

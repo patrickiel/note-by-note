@@ -3,17 +3,20 @@
 import assert from 'node:assert/strict';
 import { globSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { resolve, join } from 'node:path';
+import { dirname, resolve, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
 import { emptyLibrary, applyCommand, canonical } from '../src/core/persist/library.ts';
 import { makeTrackIdentity } from '../src/core/model/track-identity.ts';
 import { DEFAULT_PARAMS } from '../src/core/model/defaults.ts';
 import { changedRecords } from '../src/features/sync/persist/records.ts';
 
-const extension = resolve('.output/chrome-mv3-testing');
-const executablePath = globSync(resolve('.browsers/chrome/*/chrome-win64/chrome.exe'))[0];
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const extension = resolve(root, '.output', 'chrome-mv3-testing');
+const executablePath = globSync(resolve(root, '.browsers', 'chrome', '*', 'chrome-win64', 'chrome.exe'))[0];
+if (!executablePath) throw new Error('Chrome for Testing not found under .browsers/');
 const profile = mkdtempSync(join(tmpdir(), 'note-by-note-library-'));
-const launch = () => puppeteer.launch({ executablePath, headless: true, userDataDir: profile,
+const launch = () => puppeteer.launch({ executablePath, headless: !process.argv.includes('--headful'), userDataDir: profile,
   args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`, '--mute-audio'] });
 let browser;
 async function panel() {

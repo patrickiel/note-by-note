@@ -1,6 +1,6 @@
 import { DEFAULT_PARAMS } from '../model/defaults.ts';
 import { makeTrackIdentity } from '../model/track-identity.ts';
-import { cell, emptyLibrary, newest, type Library, type Practice, type SavedSong } from './library.ts';
+import { cell, defineEntry, emptyLibrary, newest, type Library, type Practice, type SavedSong } from './library.ts';
 import type { Backup } from './legacy-backup.ts';
 
 /** Collapse old Recent/Favorites/track copies once, at the boundary. */
@@ -46,10 +46,10 @@ export function migrateBackup(backup: Backup): Library {
     local.lastAccessed[key] = Math.max(local.lastAccessed[key] ?? 0, entry.lastAccessedAt);
   }
   shared.favoriteOrder = cell(backup.favorites.filter((f) => !f.deleted)
-    .map((f) => makeTrackIdentity(f.identity.normalizedUrl, f.identity.title, f.identity.durationSec).key),
+    .map((f) => ensure(f.identity).practice.value!.identity.key),
     Math.max(0, ...backup.favorites.map((f) => f.orderedAt ?? f.favoritedAt ?? 0)));
-  for (const preset of backup.eqPresets) Object.defineProperty(shared.presets, preset.name, {
-    value: cell(preset.deleted ? null : preset.gains, preset.updatedAt ?? 0), enumerable: true, writable: true, configurable: true,
-  });
+  for (const preset of backup.eqPresets) {
+    defineEntry(shared.presets, preset.name, cell(preset.deleted ? null : preset.gains, preset.updatedAt ?? 0));
+  }
   return library;
 }

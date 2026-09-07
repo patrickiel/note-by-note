@@ -3,7 +3,8 @@ import type { PanelId, SectionId, Settings, UiPrefs } from '../../../core/model/
 import { editLibrary } from '../../../core/persist/library-client';
 import { settingsItem, uiPrefsItem } from '../../../core/persist/storage';
 
-/** Settings synced two-way with storage.local. Components mutate via `update`. */
+/** Mirror of the library's settings. Components mutate via `update`, which
+ * sends the patch to the background writer. */
 class SettingsStore {
   current = $state<Settings>(structuredClone(DEFAULT_SETTINGS));
   loaded = $state(false);
@@ -45,10 +46,9 @@ class SettingsStore {
   }
 
   async update(patch: Partial<Settings>) {
-    // Dated on every write: settings cross devices as one item with one date
-    // (`merge.ts`), so the later change wins without either device having to
-    // consult its own clock about the other's.
-    const next = { ...this.current, ...patch, updatedAt: Date.now() };
+    // Settings cross devices as one revisioned item (see `core/persist/library.ts`),
+    // so the write carries no date of its own.
+    const next = { ...this.current, ...patch };
     // Auto Reset and Remember settings are alternatives — enabling one
     // switches the other off.
     if (patch.rememberSettings) next.autoReset = false;
@@ -68,7 +68,7 @@ class SettingsStore {
   }
 
   async reset() {
-    this.current = { ...structuredClone(DEFAULT_SETTINGS), updatedAt: Date.now() };
+    this.current = structuredClone(DEFAULT_SETTINGS);
     this.onChange?.(this.current);
     await editLibrary({ type: 'settings', patch: {}, reset: true });
   }
@@ -94,8 +94,7 @@ class UiPrefsStore {
   async #save() {
     this.#writing = true;
     try {
-      // Dated like Settings above — see `merge.ts`.
-      await uiPrefsItem.setValue({ ...$state.snapshot(this.current), updatedAt: Date.now() });
+      await uiPrefsItem.setValue($state.snapshot(this.current));
     } finally {
       this.#writing = false;
     }

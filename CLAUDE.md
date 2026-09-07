@@ -35,6 +35,7 @@ pnpm dlx @puppeteer/browsers install chrome@stable --path ./.browsers   # once
 node e2e/make-tone.mjs ; node e2e/make-stereo-mix.mjs                    # once, generates WAV fixtures
 pnpm wxt build --mode testing   # `testing` mode grants <all_urls> host perms so no native prompts block the run
 node e2e/run.mjs                # add --headful to watch
+node e2e/library.mjs            # background library + sync integration (pnpm test:e2e:library)
 ```
 The harness plays a 440 Hz tone and asserts on the **processed output** (e.g. 880 Hz after +12 st) via `window.__noteByNoteDebug` in the content script and `window.__panelDebug` in the side panel.
 
@@ -106,17 +107,21 @@ Runes stores (classes with `$state`), one singleton exported per file. All panel
   Feature persistence is wired directly in track-sync; there is no descriptor registry.
 - Sync stores independent gzip-compressed records in browser.storage.sync (records.ts).
   Versioned practice and favorite values merge independently. Explicit null/false
-  deletions are retained. No quota trimming, global blob or deletion expiry.
-  Quota failures leave local data intact. Background alarms retry independently of panels.
-- Backups use the readable v4 library schema. legacy-backup.ts only reads v1/v3;
-  library-migration.ts collapses old copies once. v2 remains unsupported. Old local
-  storage is retained for recovery, but only local:library is used after migration.
+  deletions are retained. There is no global blob. Because the browser caps sync at
+  512 items, library.ts prune() keeps a song while it is favorited, in Recent, or
+  among the SONG_LIMIT most recently opened, and retains only the newest
+  DELETION_LIMIT deletions (defaults.ts). Quota failures leave local data intact.
+  Background alarms retry independently of panels.
+- Backups use the readable v4 library schema. legacy-backup.ts only reads v1, the
+  format every released build wrote; library-migration.ts collapses old copies once.
+  Old local storage is retained for recovery, but only local:library is used after
+  migration.
 - Web identity uses provider ID/normalized URL. Title and duration are metadata.
   Local files retain a filename discriminator independent of the extension URL.
 
 ## Conventions & gotchas
 - Path alias `@/` → `src/` (so `@/core/*`, `@/features/*`, `@/ui/*`, `@/dev/*` all resolve). WXT provides the `#imports` virtual module (`storage`, `defineBackground`, `defineContentScript`, the `browser` global) — no explicit import of `browser`.
-- **`@/` does not work in two contexts** (they don't share the WXT/Vite resolver): the `node --test` files (`src/**/*.test.ts` and the modules they import as *values* — `fft.ts`, `center-cut-dsp.ts`, `detect-bpm.ts`, `backup-codec.ts`, `sync/persist/records.ts`, `core/persist/rekey.ts`, and what those pull in: `defaults.ts`, `thumbnail.ts`, `track-identity.ts`) must use **relative imports with explicit `.ts` extensions**; the esbuild worklet bundles (`src/features/*/engine/*.worklet.ts`) must use **relative imports**. (`import type` is erased, so type-only imports may omit the extension.)
+- **`@/` does not work in two contexts** (they don't share the WXT/Vite resolver): the `node --test` files (`src/**/*.test.ts` and the modules they import as *values* — `fft.ts`, `center-cut-dsp.ts`, `detect-bpm.ts`, `backup-codec.ts`, `sync/persist/records.ts`, `core/persist/{library,library-migration,legacy-backup,rekey}.ts`, and what those pull in: `defaults.ts`, `thumbnail.ts`, `track-identity.ts`) must use **relative imports with explicit `.ts` extensions**; the esbuild worklet bundles (`src/features/*/engine/*.worklet.ts`) must use **relative imports**. (`import type` is erased, so type-only imports may omit the extension.)
 - **Both browsers build MV3** (`manifestVersion: 3` is pinned in [wxt.config.ts](wxt.config.ts) — Firefox would otherwise default to MV2 and drop `optional_host_permissions`). Chromium-only APIs are gated on the build-time flags in [core/platform.ts](src/core/platform.ts) (`CAN_CAPTURE_TAB`, `HAS_SIDE_PANEL_API`), never on runtime `browser.*` probes: Firefox has no `tabCapture`/`offscreen` (so no capture fallback — the offscreen entrypoint is excluded from that build) and no `sidePanel` (the same page is registered as `sidebar_action`). Panel-side the capability travels as a **prop**: an absent `oncapture`/`ontabaudio` is what makes the shared UI drop the affordance.
 - Debug globals are named `__noteByNote*` / `__panelDebug`. The processor name literal is `note-by-note-center-cut` and **must match on both sides** (`vocal-reducer.worklet.ts` registers it, `vocal-reducer.ts` constructs it) — mismatches throw `InvalidStateError` at runtime and `tsc` won't catch them.
 - A `MediaElementSource` can be created only once per element per document lifetime, so **extension reloads require a page reload** to reattach.

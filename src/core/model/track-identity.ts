@@ -20,7 +20,7 @@ function normalizeUrl(rawUrl: string): string {
   if (host === 'youtube.com' || host.endsWith('.youtube.com')) {
     const v = url.searchParams.get('v') ?? /^\/(?:shorts|embed)\/([^/]+)/.exec(url.pathname)?.[1];
     if (v) return `https://youtube.com/watch?v=${v}`;
-    // Shorts / embeds carry the id in the path.
+    // Any other youtube path is its own page (a channel, a playlist view).
     return `https://youtube.com${url.pathname}`;
   }
   if (host === 'youtu.be') {
@@ -60,11 +60,6 @@ export function songKey(identity: Pick<TrackIdentity, 'normalizedUrl' | 'title'>
   // is the existing local-file discriminator; it must work across installations.
   if (/^(chrome|moz)-extension:/.test(url)) return 'file:' + hash(cleanTitle(identity.title));
   return 'web:' + hash(url);
-}
-
-/** Whether two library rows describe the same song. */
-export function isSameTrack(a: TrackIdentity, b: TrackIdentity): boolean {
-  return a.key === b.key;
 }
 
 export function makeTrackIdentity(

@@ -18,7 +18,7 @@
     parseBackup,
     restoreBackup,
   } from '@/core/persist/backup';
-  import { history } from '@/features/library/panel/history.svelte';
+  import { history } from '@/features/library/panel/history';
   import { applyTheme, settings } from '@/features/settings/panel/settings.svelte';
   import { session } from '@/core/state/session.svelte';
   import { view } from '@/core/state/view.svelte';

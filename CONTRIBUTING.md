@@ -54,10 +54,11 @@ For the browser-level e2e suite (it plays a 440 Hz tone and asserts on the
 - **A media element can host exactly one `MediaElementSourceNode`** for the
   lifetime of the document. Reloading the extension therefore means reloading
   the page too.
-- **The e2e suite is not currently all-green** — 22 of 30. The audio path passes
-  end to end; the failures are in marker chips, loop and sequence bounds, the
+- **The e2e suite is not currently all-green.** The audio path passes end to
+  end; the failures are in marker chips, loop and sequence bounds, the
   tab-capture CTA, and the vocal-reducer control. They pre-date any change you
-  are about to make; compare against a clean checkout before assuming otherwise.
+  are about to make; compare the tally against a clean checkout before assuming
+  otherwise.
 
 ## Architecture in one paragraph
 

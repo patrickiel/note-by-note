@@ -39,7 +39,7 @@ function defaults<T>(value: unknown, fallback: T): T {
     else if (Array.isArray(expected)) array(next).forEach(number);
     else if (typeof expected === 'object') { result[key] = defaults(next, expected); continue; }
     else if (typeof next !== typeof expected) throw new Error('Damaged library setting.');
-    if (typeof next === 'number') number(next);
+    else if (typeof next === 'number') number(next);
     result[key] = next;
   }
   return result as T;
@@ -106,5 +106,5 @@ export function parseBackupJson(value: unknown): Backup {
   if (raw.format !== BACKUP_FORMAT) throw new Error("That file isn't a Note by Note backup.");
   if (raw.version > BACKUP_VERSION) throw new Error('That backup was made by a newer version of Note by Note.');
   const library = raw.version === BACKUP_VERSION ? parseLibrary(raw) : migrateBackup(parseLegacy(raw));
-  return { format: BACKUP_FORMAT, version: BACKUP_VERSION, exportedAt: raw.exportedAt ?? raw.at ?? 0, ...library };
+  return { format: BACKUP_FORMAT, version: BACKUP_VERSION, exportedAt: raw.exportedAt ?? 0, ...library };
 }

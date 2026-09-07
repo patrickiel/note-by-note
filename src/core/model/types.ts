@@ -37,13 +37,6 @@ export interface EffectParams {
 export interface EqPreset {
   name: string;
   gains: number[];
-  /** Last save — or, with `deleted`, the removal. Absent on presets from
-   * before sync merged; reads as 0, so any dated copy beats them. */
-  updatedAt?: number;
-  /** A tombstone: the preset was deleted at `updatedAt`, and the row is kept
-   * so a sync merge can tell "removed" from "never had it" (legacy backups).
-   * `gains` is emptied — nothing reads them again. */
-  deleted?: true;
 }
 
 export interface Marker {
@@ -106,7 +99,9 @@ export interface ChordChart {
 /** Stable identity of a piece of media, so settings/markers/snippets survive
  * reloads and URL noise. */
 export interface TrackIdentity {
-  /** `${hash(normalizedUrl)}:${round(duration)}` */
+  /** The saved song's key — see `songKey` in core/model/track-identity.ts.
+   * Derived from the provider id or normalized URL, never from the duration,
+   * which drifts (pre-roll ads, metadata that settles late). */
   key: string;
   normalizedUrl: string;
   title: string;
@@ -136,29 +131,19 @@ export interface HistoryEntry {
   params: EffectParams;
   thumbnailUrl?: string;
   pageUrl: string;
-  createdAt: number;
-  /** Last save — or, with `deleted`, the removal. The one date a merge reads
-   * for this row (legacy backups). */
+  /** Last save — the date Recent sorts and displays by. */
   updatedAt: number;
-  /** A tombstone: the row was removed at `updatedAt`, and is kept so a sync
-   * merge can tell "removed" from "never had it" (legacy backups). The panel
-   * stores filter these out, so nothing downstream ever sees one. */
-  deleted?: true;
 }
 
 /** A song the user starred (History → Favorites). Persists independently of
  * the LRU-capped Recent list. Stored array order = manual sort order. */
 export interface FavoriteEntry extends HistoryEntry {
-  /** When the star was put there. Display only — the star and the unstar are
-   * the only writers of `updatedAt`, which is what the merge reads, so
-   * ordinary practice can no longer outdate another device's unfavorite. */
+  /** When the star was put there — the favorite's own revision date, kept
+   * apart from `updatedAt` so ordinary practice cannot outdate an unfavorite
+   * made on another device. */
   favoritedAt: number;
   /** Last time the track was opened or played, for "Last Accessed" sorting. */
   lastAccessedAt: number;
-  /** When the manual order this row sits in was last set — by a drag
-   * (`setFavoritesOrder`) or by the star that put it on top. Decides whose
-   * order a merge keeps; absent on rows written before manual order synced. */
-  orderedAt?: number;
 }
 
 export type FavoritesSort = 'lastAccessed' | 'title' | 'manual';
@@ -288,11 +273,6 @@ export interface Settings {
   /** Play an audible click on each count-in beat (accented downbeat). */
   countInBeep: boolean;
   lastUsedParams?: EffectParams;
-  /** Last change, set by the settings store on every write. Settings travel
-   * between devices as one item with one date (see `merge.ts`); absent on
-   * settings written before that, which reads as 0. Never part of the file's
-   * settings diff — the codec carries it separately. */
-  updatedAt?: number;
 }
 
 export type PanelId =
@@ -320,6 +300,4 @@ export interface UiPrefs {
   accentHue: number;
   /** User overrides for the virtual Start/End marker labels (empty = default). */
   boundaryLabels: { start: string; end: string };
-  /** Last change — see `Settings.updatedAt`. */
-  updatedAt?: number;
 }

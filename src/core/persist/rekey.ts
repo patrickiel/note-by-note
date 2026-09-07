@@ -2,7 +2,7 @@ import { songKey } from '../model/track-identity.ts';
 import type { TrackIdentity } from '../model/types';
 
 /**
- * Re-deriving stored keys, for the migration in `migrate.ts`.
+ * Re-deriving stored keys, for the one-time migration in `library-migration.ts`.
  *
  * Pure and DOM-free (relative `.ts` imports; runs under `node --test`) because
  * it is the one step of that migration that can lose data: rows a key change

@@ -26,7 +26,7 @@ The extension itself:
 - Anything that causes the extension to grant, keep, or widen host permissions
   beyond what the user approved
 - Injection through data the extension stores and later renders — track titles,
-  marker labels, thumbnail URLs, restored sync snapshots
+  marker labels, thumbnail URLs, synced records and imported backups
 
 ## What is not a vulnerability
 

@@ -85,10 +85,6 @@ class SessionStore {
     volume(volume: number): void;
   } | null = null;
 
-  setMedia(media: MediaInfo | null) {
-    this.media = media;
-  }
-
   attachTransport(send: (cmd: EngineCommand) => void) {
     this.#send = send;
   }
@@ -126,7 +122,7 @@ class SessionStore {
       case 'snapshot':
         this.connection = event.state;
         this.#dspBlocked = !event.dspAvailable;
-        this.setMedia(event.media);
+        this.media = event.media;
         this.params = event.params;
         this.volume = event.volume;
         this.loop = event.loop;
@@ -152,7 +148,7 @@ class SessionStore {
         this.#dspBlocked = !event.available;
         break;
       case 'media':
-        this.setMedia(event.media);
+        this.media = event.media;
         // Zero duration = metadata still loading: keep seeks gated a moment
         // longer (mirrors track-sync's zero-duration grace period).
         if (event.media?.duration) this.#setSourceChanging(false);

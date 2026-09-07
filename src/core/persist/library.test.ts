@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyCommand, canonical, cell, emptyLibrary, favoriteEntries, mergeShared, nextRevision, recentEntries } from './library.ts';
+import { applyCommand, canonical, emptyLibrary, favoriteEntries, mergeShared, nextRevision, recentEntries } from './library.ts';
 import { migrateBackup } from './library-migration.ts';
 import { parseBackupJson } from './backup-codec.ts';
 import { DEFAULT_PARAMS, DEFAULT_SETTINGS, DEFAULT_UI_PREFS, DELETION_LIMIT, SONG_LIMIT } from '../model/defaults.ts';
@@ -102,8 +102,8 @@ test('replacement import dates both present and absent records after observed fu
 });
 
 test('migration collapses parameters, favorites and markers without syncing local data', () => {
-  const entry = { identity, pageUrl: identity.normalizedUrl, params: { ...DEFAULT_PARAMS, speed: 0.7 }, createdAt: 1, updatedAt: 10 };
-  const migrated = migrateBackup({ format: 'note-by-note-backup', version: 1, exportedAt: 20, appVersion: '',
+  const entry = { identity, pageUrl: identity.normalizedUrl, params: { ...DEFAULT_PARAMS, speed: 0.7 }, updatedAt: 10 };
+  const migrated = migrateBackup({ format: 'note-by-note-backup', version: 1,
     settings: { ...DEFAULT_SETTINGS, lastUsedParams: DEFAULT_PARAMS }, uiPrefs: DEFAULT_UI_PREFS, eqPresets: [],
     history: [entry], favorites: [{ ...entry, params: DEFAULT_PARAMS, updatedAt: 5, favoritedAt: 15, lastAccessedAt: 16 }],
     tracks: [{ identity, updatedAt: 11, markers: [{ id: 'm', t: 42, label: '' }], snippets: [], sequenceLoop: false, sequenceCountIn: false, chordChart: null }],
@@ -120,33 +120,12 @@ test('new backups round-trip complete data and reject malformed or unsupported f
   const backup = { format: 'note-by-note-backup', version: 4, exportedAt: 100, ...save() };
   assert.deepEqual(parseBackupJson(JSON.parse(JSON.stringify(backup))), backup);
   assert.throws(() => parseBackupJson({ ...backup, version: 5 }), /newer version/);
-  assert.throws(() => parseBackupJson({ ...backup, version: 2 }), /no longer reads/);
+  assert.throws(() => parseBackupJson({ ...backup, version: 3 }), /no longer reads/);
   const damaged = structuredClone(backup);
   damaged.shared.songs[identity.key].practice.value!.identity.key = 'old-key';
   assert.equal(parseBackupJson(damaged).shared.songs[identity.key].practice.value!.identity.key, identity.key);
   damaged.shared.songs[identity.key].practice.value!.identity.normalizedUrl = 'https://different.example';
   assert.throws(() => parseBackupJson(damaged), /identity/);
-});
-
-test('compact v3 imports preserve tuning, markers, snippets, local chords and favorite order', () => {
-  const backup = parseBackupJson({ format: 'note-by-note-backup', version: 3, at: 1000,
-    s: { lp: { s: 0.75 } }, u: { markerView: 'list' }, eq: [['Bass', [1, 2], 5]],
-    songs: [['yt:example', 'Song', 200]],
-    h: [{ i: 0, at: 10, p: { s: 0.86, c: -2, tu: [442, 440] } }],
-    f: [{ i: 0, at: 10, fa: 12, la: 15, p: { s: 0.86, c: -2, tu: [442, 440] } }],
-    t: [{ i: 0, at: 11, m: [[3753, 'Verse']], s: [['Loop', 1000, 4000, 0]], ce: 1,
-      ch: { t0: 100, d: [200], l: ['C'], i: [0], cov: 1, a0: 100, a1: 300, c: 9 } }],
-  });
-  const practice = backup.shared.songs['yt:example'].practice.value!;
-  assert.equal(practice.params!.speed, 0.86);
-  assert.deepEqual(practice.params!.tuning, { trackHz: 442, instrumentHz: 440 });
-  assert.equal(practice.markers[0].t, 3.753);
-  assert.equal(practice.snippets[0].repeats, Infinity);
-  assert.deepEqual(backup.shared.favoriteOrder.value, ['yt:example']);
-  assert.equal(backup.local.charts['yt:example']!.segments[0].label, 'C');
-  assert.equal(backup.local.lastUsedParams!.speed, 0.75);
-  assert.equal(canonical(backup.shared).includes('chordChart'), false);
-  assert.equal(canonical(parseBackupJson(JSON.parse(JSON.stringify(backup)))), canonical(backup));
 });
 
 test('preset names are data, including names matching object properties', () => {

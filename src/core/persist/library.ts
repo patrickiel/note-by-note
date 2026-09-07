@@ -2,7 +2,7 @@ import { DEFAULT_PARAMS, DEFAULT_SETTINGS, DEFAULT_UI_PREFS, DELETION_LIMIT, HIS
 import type { ChordChart, EffectParams, FavoriteEntry, HistoryEntry, Settings, TrackData, TrackIdentity, UiPrefs } from '../model/types';
 
 /** One revision per independently editable value. Null/false are durable deletions. */
-export interface Versioned<T> { at: number; value: T }
+interface Versioned<T> { at: number; value: T }
 export interface Practice extends Omit<TrackData, 'updatedAt' | 'chordChart'> {
   params?: EffectParams;
   pageUrl: string;
@@ -30,6 +30,12 @@ export interface Library {
 }
 
 export const cell = <T>(value: T, at = 0): Versioned<T> => ({ at, value });
+/** Song keys and preset names are user data, so they may spell an object
+ * property (`__proto__`, `constructor`). Defining the entry writes the map the
+ * plain assignment would only appear to. */
+export function defineEntry<T>(target: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
+}
 export function emptyLibrary(): Library {
   return {
     shared: { settings: cell(structuredClone(DEFAULT_SETTINGS)), songs: {}, presets: {}, favoriteOrder: cell([]) },
@@ -164,7 +170,7 @@ export function applyCommand(library: Library, command: LibraryCommand, now = Da
     }
     case 'chart': local.charts[command.key] = command.chart; break;
     case 'settings': {
-      const { lastUsedParams, updatedAt: ignored, ...patch } = command.patch;
+      const { lastUsedParams, ...patch } = command.patch;
       if (lastUsedParams) local.lastUsedParams = lastUsedParams;
       if (command.reset || Object.keys(patch).length) {
         const value = { ...(command.reset ? structuredClone(DEFAULT_SETTINGS) : shared.settings.value), ...patch };
@@ -176,9 +182,7 @@ export function applyCommand(library: Library, command: LibraryCommand, now = Da
       break;
     }
     case 'uiPrefs': local.uiPrefs = command.value; break;
-    case 'preset': Object.defineProperty(shared.presets, command.name, {
-      value: cell(command.gains, at), enumerable: true, writable: true, configurable: true,
-    }); break;
+    case 'preset': defineEntry(shared.presets, command.name, cell(command.gains, at)); break;
     case 'import': {
       const file = structuredClone(command.library);
       const revision = Math.max(at, nextRevision(file.shared, now));
@@ -188,8 +192,8 @@ export function applyCommand(library: Library, command: LibraryCommand, now = Da
         shared.songs[key] = { practice: cell(song?.practice.value ?? null, revision), favorite: cell(song?.favorite.value ?? false, revision) };
       }
       for (const name of new Set([...Object.keys(shared.presets), ...Object.keys(file.shared.presets)])) {
-        Object.defineProperty(shared.presets, name, { value: cell(Object.hasOwn(file.shared.presets, name) ? file.shared.presets[name].value : null, revision),
-          enumerable: true, writable: true, configurable: true });
+        defineEntry(shared.presets, name,
+          cell(Object.hasOwn(file.shared.presets, name) ? file.shared.presets[name].value : null, revision));
       }
       shared.settings = cell(file.shared.settings.value, revision);
       shared.favoriteOrder = cell(file.shared.favoriteOrder.value, revision);
@@ -202,14 +206,14 @@ export function applyCommand(library: Library, command: LibraryCommand, now = Da
 }
 
 /** UI rows are projections. They are never written back as library copies. */
-export function songEntry(key: string, library: Library): HistoryEntry | null {
+function songEntry(key: string, library: Library): HistoryEntry | null {
   const song = library.shared.songs[key];
   const practice = song?.practice.value;
   if (!practice) return null;
   return {
     identity: practice.identity, pageUrl: practice.pageUrl, thumbnailUrl: practice.thumbnailUrl,
     params: practice.params ?? structuredClone(DEFAULT_PARAMS),
-    createdAt: song.practice.at, updatedAt: library.local.recent[key] ?? song.practice.at,
+    updatedAt: library.local.recent[key] ?? song.practice.at,
   };
 }
 export function recentEntries(library: Library): HistoryEntry[] {

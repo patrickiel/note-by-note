@@ -7,8 +7,8 @@
   import { cleanTitle } from '@/core/model/track-identity';
   import { youtubeThumbnailUrl } from '@/core/model/thumbnail';
   import type { FavoriteEntry, FavoritesSort, HistoryEntry } from '@/core/model/types';
-  import { favorites } from '@/features/library/panel/favorites.svelte';
-  import { history } from '@/features/library/panel/history.svelte';
+  import { favorites } from '@/features/library/panel/favorites';
+  import { history } from '@/features/library/panel/history';
   import { uiPrefs } from '@/features/settings/panel/settings.svelte';
   import { view } from '@/core/state/view.svelte';
 

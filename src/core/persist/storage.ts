@@ -8,7 +8,6 @@ const settingsOf = (library: Awaited<ReturnType<typeof readLibrary>>): Settings 
 });
 export const settingsItem = {
   getValue: async () => settingsOf(await readLibrary()),
-  setValue: (value: Settings) => editLibrary({ type: 'settings', patch: value }),
   watch: (listener: (value: Settings) => void) => watchLibrary(settingsOf, listener),
 };
 export const uiPrefsItem = {

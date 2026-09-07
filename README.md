@@ -162,8 +162,9 @@ the other way round.
   extension means reloading the page too.
 - `note-by-note-center-cut` is a string literal on both sides of the worklet
   boundary — `tsc` won't catch a mismatch, you'll get an `InvalidStateError`.
-- The playback E2E suite has 47 checks. `node e2e/library.mjs` additionally
-  checks concurrent library edits, remote updates, restart recovery and sync capacity.
+- `node e2e/run.mjs` prints a pass/fail tally for the playback suite;
+  `node e2e/library.mjs` (`pnpm test:e2e:library`) additionally checks concurrent
+  library edits, remote updates, restart recovery and sync capacity.
 
 ## Sync
 
@@ -180,17 +181,20 @@ configuration until the song is reopened. Sync never reloads the panel.
 Each song is a complete, independently compressed sync item. Practice edits and
 favorite membership have separate revisions; preset deletion is an explicit null.
 Revisions advance past everything a device has observed, with deterministic ties.
-There is no whole-library blob, chunk assembly, automatic trimming or timed
-expiry of deletion records. If a record or library exceeds the browser's capacity,
-local data remains saved and Settings reports the error. Export a backup to transfer
-all data, including local history and analysis.
+There is no whole-library blob and no chunk assembly. Because the browser caps
+sync at 512 items, a song is kept while it is favorited, in Recent, or among the
+300 most recently opened; past that it becomes a dated deletion so the removal
+crosses devices, and only the newest 100 deletions are kept. If a record or
+library exceeds the browser's capacity, local data remains saved and Settings
+reports the error. Export a backup to transfer all data, including local history
+and analysis.
 
 Backups are readable version-4 JSON containing shared and local sections. Imports
-accept the previously supported v1/v3 formats and convert them once. Replacing a
-backup replaces this device's library and dates the named changes for sync; it does
-not delete songs known only to another device. Old local storage is retained as a
-recovery copy after the first migration. Upgrade all devices before using the new
-sync format; older builds cannot read it.
+also accept the version-1 format every released build wrote, and convert it once.
+Replacing a backup replaces this device's library and dates the named changes for
+sync; it does not delete songs known only to another device. Old local storage is
+retained as a recovery copy after the first migration. Upgrade all devices before
+using the new sync format; older builds cannot read it.
 
 ## License
 

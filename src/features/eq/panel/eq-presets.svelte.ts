@@ -14,7 +14,7 @@ class EqPresetsStore {
   async init() {
     const select = (library: Library): EqPreset[] => Object.entries(library.shared.presets)
       .filter(([, preset]) => preset.value !== null)
-      .map(([name, preset]) => ({ name, gains: preset.value!, updatedAt: preset.at }));
+      .map(([name, preset]) => ({ name, gains: preset.value! }));
     this.saved = select(await readLibrary());
     watchLibrary(select, (value) => { this.saved = value; });
   }
