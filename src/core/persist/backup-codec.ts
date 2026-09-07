@@ -5,6 +5,7 @@ import {
 } from '../model/defaults.ts';
 import { youtubeThumbnailUrl } from '../model/thumbnail.ts';
 import { songKey } from '../model/track-identity.ts';
+import { rekeyByIdentity } from './rekey.ts';
 import type {
   ChordChart,
   ChordSegment,
@@ -48,21 +49,17 @@ import type {
 /** Marks a file as ours, so a stray JSON can be rejected on sight. */
 export const BACKUP_FORMAT = 'note-by-note-backup';
 
-/** The verbose shape: what `createBackup` builds and what exports were
- * before the compact format. Still accepted on import. */
+/** The verbose shape: what `createBackup` builds, and the only format any
+ * released build ever wrote — so it is the one an existing user's exported
+ * file is in, and import still accepts it. */
 export const BACKUP_VERSION = 1;
 
-/** The compact shape below. `parseBackupJson` rejects anything newer.
- *
- * 3 added tombstones (`x`) to Recent, Favorites and the EQ presets, the
- * favorites' `orderedAt` (`oa`) and the settings/prefs dates (`sat`/`uat`),
- * and dropped the `del` map that 2 carried. A 2 file still reads — it simply
- * has no tombstones, and its `del` records are not translatable (a deletion
- * key names a song by hash, and a tombstone has to *be* the row). */
+/** The compact shape below, and what the export writes. `parseBackupJson`
+ * takes this or the verbose v1, and nothing else: version 2 never shipped —
+ * it existed only on the branch this format grew on — so no file and no synced
+ * blob is in it, and carrying a compatibility path for it would be carrying
+ * one for nobody. */
 export const COMPACT_VERSION = 3;
-
-/** The oldest compact shape still readable. */
-export const COMPACT_MIN_VERSION = 2;
 
 /** Everything a user owns, in one file. Host permissions are deliberately out:
  * they live in the browser's permission store, and only a prompt can grant
@@ -116,8 +113,8 @@ export interface CompactParams {
 
 /** `[normalizedUrl, title, durationSec]`. YouTube watch URLs are shortened to
  * `yt:<id>`. The key is never stored: it is `songKey` of the first two, which
- * is why a file written by a build that keyed songs differently still reads —
- * each build derives the key it uses from the same two strings. */
+ * is why a device on either side of a key change reads the other's blob —
+ * each derives the key it uses from the same two strings. */
 export type CompactSong = [string, string, number];
 
 export interface CompactEntry {
@@ -265,14 +262,15 @@ function rec(value: unknown, section: string): Record<string, unknown> {
   return value;
 }
 
-/** Entries are keyed by `identity.key`; without one they can't be stored or
- * matched back to a track, so a file carrying them is not usable. */
-function keyedArr<T>(value: unknown, section: string): T[] {
+/** Rows are identified by their URL and title (`songKey`); without those they
+ * can't be stored or matched back to a track, so a file carrying them is not
+ * usable. The key a file may also carry is not read — it is derived. */
+function identifiedArr<T>(value: unknown, section: string): T[] {
   const list = arr(value, section);
-  const keyed = list.every(
-    (e) => isRecord(e) && isRecord(e.identity) && typeof e.identity.key === 'string',
+  const identified = list.every(
+    (e) => isRecord(e) && isRecord(e.identity) && typeof e.identity.normalizedUrl === 'string',
   );
-  if (!keyed) throw damaged(section);
+  if (!identified) throw damaged(section);
   return list as T[];
 }
 
@@ -465,9 +463,7 @@ class SongTable {
 function decodeSongs(raw: unknown): TrackIdentity[] {
   return arr(raw, 'songs').map((row) => {
     const r = arr(row, 'songs');
-    // A fourth element is a key from a build that stored one; the key is
-    // derived here either way, so it is read past rather than trusted.
-    if (r.length < 3 || r.length > 4) throw damaged('songs');
+    if (r.length !== 3) throw damaged('songs');
     const normalizedUrl = longUrl(str(r[0], 'songs'));
     const title = str(r[1], 'songs');
     const durationSec = num(r[2], 'songs');
@@ -784,11 +780,7 @@ export function isEmptyBackup(backup: Backup): boolean {
 /** Reads a compact (v2) backup, or throws an `Error` whose message is safe to
  * show the user. Unknown keys are ignored so the format can grow. */
 export function decodeBackup(raw: unknown): Backup {
-  const version = isRecord(raw) && typeof raw.version === 'number' ? raw.version : 0;
-  if (
-    !isRecord(raw) || raw.format !== BACKUP_FORMAT ||
-    version < COMPACT_MIN_VERSION || version > COMPACT_VERSION
-  ) {
+  if (!isRecord(raw) || raw.format !== BACKUP_FORMAT || raw.version !== COMPACT_VERSION) {
     throw new Error("That file isn't a Note by Note backup.");
   }
   const songs = decodeSongs(raw.songs);
@@ -810,9 +802,11 @@ export function decodeBackup(raw: unknown): Backup {
   };
 }
 
-/** The verbose v1 file: today's in-memory shape, written out as is. Objects
- * are backfilled from the defaults so a file from an older build gains any
- * setting added since. */
+/** The verbose v1 file: the in-memory shape, written out as is. Objects are
+ * backfilled from the defaults so a file from an older build gains any setting
+ * added since, and every row's key is re-derived — v1 files were written when
+ * a key baked in the duration, and rows that split across two of those are one
+ * song again here (`rekey.ts`, `track-identity.ts`). */
 function normalizeV1(raw: Record<string, unknown>): Backup {
   return {
     format: BACKUP_FORMAT,
@@ -827,10 +821,10 @@ function normalizeV1(raw: Record<string, unknown>): Backup {
       ...(JSON.parse(JSON.stringify(DEFAULT_UI_PREFS)) as UiPrefs),
       ...(isRecord(raw.uiPrefs) ? raw.uiPrefs : {}),
     },
-    history: keyedArr<HistoryEntry>(raw.history, 'history'),
-    favorites: keyedArr<FavoriteEntry>(raw.favorites, 'favorites'),
+    history: rekeyByIdentity(identifiedArr<HistoryEntry>(raw.history, 'history')),
+    favorites: rekeyByIdentity(identifiedArr<FavoriteEntry>(raw.favorites, 'favorites')),
     eqPresets: arr(raw.eqPresets, 'eqPresets') as EqPreset[],
-    tracks: keyedArr<TrackData>(raw.tracks, 'tracks'),
+    tracks: rekeyByIdentity(identifiedArr<TrackData>(raw.tracks, 'tracks')),
   };
 }
 
@@ -842,8 +836,12 @@ export function parseBackupJson(raw: unknown): Backup {
   if (!isRecord(raw) || raw.format !== BACKUP_FORMAT) {
     throw new Error("That file isn't a Note by Note backup.");
   }
-  if (typeof raw.version !== 'number' || raw.version > COMPACT_VERSION) {
+  const version = typeof raw.version === 'number' ? raw.version : 0;
+  if (version > COMPACT_VERSION) {
     throw new Error('That backup was made by a newer version of Note by Note.');
   }
-  return raw.version >= COMPACT_MIN_VERSION ? decodeBackup(raw) : normalizeV1(raw);
+  if (version === COMPACT_VERSION) return decodeBackup(raw);
+  if (version === BACKUP_VERSION) return normalizeV1(raw);
+  // Only 2 lands here, and only from the branch this format grew on.
+  throw new Error('That backup is in a format this version of Note by Note no longer reads.');
 }

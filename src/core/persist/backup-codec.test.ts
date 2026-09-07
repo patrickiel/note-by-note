@@ -461,14 +461,24 @@ test('identity: the key is rebuilt from the URL and duration, never stored', () 
   );
 });
 
-test('identity: a key a file carried is read past; the key is derived', () => {
-  // Older files stored a fourth element when the key didn't match the formula
-  // that build used. Every build derives its own key from the same two
-  // strings, which is what lets devices on either side of a key change read
-  // each other's blobs.
-  const enc = JSON.parse(JSON.stringify(encodeBackup(backup({ history: [entry(ytSong)] }))));
-  enc.songs[0][3] = 'legacy:230';
-  assert.equal(decodeBackup(enc).history[0].identity.key, ytSong.key);
+test('identity: a v1 file’s stored keys are re-derived, not trusted', () => {
+  // v1 is the only format a released build wrote, and it wrote keys that baked
+  // in the duration. They are derived again on the way in, so a song a v1 file
+  // holds twice — two durations, one song — comes back as one row with its
+  // markers intact.
+  const drifted = { ...makeTrackIdentity(YT_HREF, ytSong.title, 231), key: 'a1b2:231' };
+  const v1 = JSON.parse(JSON.stringify(backup({
+    history: [
+      { ...entry(ytSong), identity: { ...ytSong, key: 'a1b2:230' }, updatedAt: 100 },
+      { ...entry(ytSong), identity: drifted, updatedAt: 200 },
+    ],
+    tracks: [{ ...track(ytSong), identity: { ...ytSong, key: 'a1b2:230' } }],
+  })));
+  const back = parseBackupJson(v1);
+  assert.equal(back.history.length, 1, 'two durations were always one song');
+  assert.equal(back.history[0].identity.key, ytSong.key);
+  assert.equal(back.history[0].updatedAt, 200, 'the more recently written copy');
+  assert.equal(back.tracks[0].identity.key, ytSong.key);
 });
 
 test('identity: a duration that drifted is the same song', () => {
@@ -541,18 +551,6 @@ test('settings and prefs carry their own date, outside the diff', () => {
   assert.equal(roundTrip(b).uiPrefs.updatedAt, 1_757_000_000_001);
 });
 
-test('a version 2 file still reads; its del map is dropped', () => {
-  const v2 = {
-    ...JSON.parse(JSON.stringify(encodeBackup(library(3)))),
-    version: 2,
-    del: { 'h:abc:230': 1_757_112_345_678 },
-  };
-  const back = parseBackupJson(v2);
-  assert.equal(back.history.length, 3);
-  assert.equal(back.history.some((e) => e.deleted), false);
-  assert.equal('deletions' in back, false);
-});
-
 test('exportedAt is kept; appVersion is dropped', () => {
   const back = roundTrip(backup());
   assert.equal(back.exportedAt, 1_757_200_000_123);
@@ -572,10 +570,12 @@ test('a verbose v1 file still parses and is backfilled', () => {
   assert.equal(back.appVersion, '1.0.3');
 });
 
-test('a compact file routes through the codec; anything newer or foreign is refused', () => {
+test('only v1 and the current compact shape are read; the rest are refused', () => {
   const compact = JSON.parse(JSON.stringify(encodeBackup(library(2))));
   assert.equal(parseBackupJson(compact).history.length, 2);
-  assert.equal(parseBackupJson({ ...compact, version: 2 }).history.length, 2, 'v2 too');
+  // 2 never shipped: no file and no synced blob is in it, so it is refused
+  // rather than carried — and the message says which way it is wrong.
+  assert.throws(() => parseBackupJson({ ...compact, version: 2 }), /no longer reads/);
   assert.throws(() => parseBackupJson({ ...compact, version: COMPACT_VERSION + 1 }), /newer version/);
   assert.throws(() => parseBackupJson({ ...compact, format: 'other' }), /isn't a Note by Note backup/);
   assert.throws(() => parseBackupJson('nope'), /isn't a Note by Note backup/);
