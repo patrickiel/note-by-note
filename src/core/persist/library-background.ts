@@ -1,5 +1,5 @@
 import { onMessage } from '../messaging/rpc';
-import { applyCommand, canonical, emptyLibrary, mergeShared, type Library } from './library';
+import { applyCommand, canonical, emptyLibrary, mergeShared, pruned, type Library } from './library';
 import { libraryItem } from './library-client';
 import { parseBackupJson as parseLegacy } from './legacy-backup';
 import { parseLibrary } from './backup-codec';
@@ -46,7 +46,9 @@ export function startLibraryBackground() {
   const init = () => ready ??= (async () => {
     // Only the migration needs every old key. Ordinary wakes read one item.
     if ((await browser.storage.local.get('library')).library) return;
-    await libraryItem.setValue(migrate(await browser.storage.local.get(null)));
+    // Pruned on the way in: an old library can hold far more songs than sync
+    // allows, and without this the first reconcile would fail on every retry.
+    await libraryItem.setValue(pruned(migrate(await browser.storage.local.get(null))));
   })().catch((error) => { ready = undefined; throw error; });
   const schedule = async () => {
     const config = await loadSyncConfig();
@@ -62,17 +64,22 @@ export function startLibraryBackground() {
       config.usedBytes = bytesUsed(existing);
       const remote = await readRecords(existing);
       const local = await libraryItem.getValue();
-      const shared = mergeShared(local.shared, remote);
-      if (canonical(shared) !== canonical(local.shared)) await libraryItem.setValue({ ...local, shared });
-      const { changes, skipped, usedBytes } = await changedRecords(shared, remote, existing);
-      if (Object.keys(changes).length) {
+      // Pruned here too: a merge can carry in more songs than the limits allow,
+      // and only `applyCommand` would otherwise ever bring it back under them.
+      const merged = pruned({ ...local, shared: mergeShared(local.shared, remote) });
+      if (canonical(merged) !== canonical(local)) await libraryItem.setValue(merged);
+      const { changes, removals, skipped, usedBytes } = await changedRecords(merged.shared, remote, existing);
+      // Recorded before the throttle returns, or a merge that succeeded would
+      // leave the previous run's error on screen until a push happens to be due.
+      config.lastSyncedAt = Date.now();
+      config.lastError = skipped.length ? skippedMessage(skipped) : null;
+      if (Object.keys(changes).length || removals.length) {
         if (Date.now() < config.lastPushAt + PUSH_INTERVAL) { await schedule(); return; }
-        await browser.storage.sync.set(changes);
+        if (removals.length) await browser.storage.sync.remove(removals);
+        if (Object.keys(changes).length) await browser.storage.sync.set(changes);
         config.lastPushAt = Date.now();
         config.usedBytes = usedBytes;
       }
-      config.lastSyncedAt = Date.now();
-      config.lastError = skipped.length ? skippedMessage(skipped) : null;
     } catch (error) {
       config.lastError = error instanceof Error ? error.message : String(error);
     } finally {
@@ -116,6 +123,9 @@ export function startLibraryBackground() {
     }
   });
   // Recreate the safety alarm on each worker start. No panel has to stay open.
-  void browser.alarms.create(SAFETY, { periodInMinutes: 1 });
+  // Only a net: `libraryEdit` schedules WAKE and `storage.onChanged` catches
+  // remote writes, so this never needs to be the thing that notices a change —
+  // and each run wakes the worker to decompress every record.
+  void browser.alarms.create(SAFETY, { periodInMinutes: 30 });
   void enqueue(reconcile);
 }

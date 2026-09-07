@@ -46,3 +46,39 @@ test('a record too large to sync is reported and left behind, never blocking the
 test('unsupported records are rejected before any application or upload', async () => {
   await assert.rejects(readRecords({ 'nbn4:settings': { version: 5, data: '' } }), /Unsupported/);
 });
+
+test('a record the library no longer holds is removed remotely, not merged back', async () => {
+  const library = applyCommand(emptyLibrary(), { type: 'practice', identity: song(1), patch: {}, recent: true });
+  const { changes: items } = await changedRecords(library.shared, emptyLibrary().shared, {});
+  const remote = await readRecords(items);
+  // The song is gone locally: sync must drop it rather than read it back forever.
+  const { removals } = await changedRecords(emptyLibrary().shared, remote, items);
+  assert.deepEqual(removals, ['nbn4:song:' + song(1).key]);
+  // A record this build does not own belongs to a newer one and is left alone.
+  const foreign = { ...items, 'nbn4:future:1': { version: 4, data: '' } };
+  assert.ok(!(await changedRecords(library.shared, remote, foreign)).removals.includes('nbn4:future:1'));
+});
+
+test('one damaged record costs only itself, never the rest or the upload', async () => {
+  let library = emptyLibrary();
+  for (const n of [1, 2]) library = applyCommand(library, { type: 'practice', identity: song(n), patch: {}, recent: true });
+  const { changes: items } = await changedRecords(library.shared, emptyLibrary().shared, {});
+  const damaged = { ...items, ['nbn4:song:' + song(1).key]: { version: 4, data: 'not-gzip-at-all' } };
+  const remote = await readRecords(damaged);
+  assert.deepEqual(Object.keys(remote.songs), [song(2).key]);
+  // The undamaged song still round-trips, so this device is not locked out.
+  assert.equal(canonical(remote.songs[song(2).key]), canonical(library.shared.songs[song(2).key]));
+});
+
+test('over budget, songs are held back and reported; the small records still sync', async () => {
+  let library = emptyLibrary();
+  const markers = Array.from({ length: 300 }, (_, n) => ({ id: 'm' + n, t: n, label: 'Marker ' + n }));
+  for (const n of [1, 2, 3]) library = applyCommand(library, { type: 'practice', identity: song(n), patch: { markers }, recent: true });
+  const before = canonical(library);
+  const padded = { unrelated: 'x'.repeat(102400 - 3000) };
+  const { changes, skipped, usedBytes } = await changedRecords(library.shared, emptyLibrary().shared, padded);
+  assert.ok(skipped.length > 0, 'the songs that do not fit are reported');
+  assert.ok(Object.keys(changes).includes('nbn4:settings'), 'settings are small and always get through');
+  assert.ok(usedBytes <= 102400, 'what is written fits the quota');
+  assert.equal(canonical(library), before, 'nothing is trimmed from the library itself');
+});

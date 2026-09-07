@@ -45,11 +45,17 @@ class TrackSync {
   }
 
   async onMedia(media: MediaInfo | null) {
-    if (!media) { this.onEngineLost(); return; }
+    // Null media is a transient engine state (detecting, no player, mid source
+    // change), not the end of the session — dropping the track here would throw
+    // away edits made before the next event. Real loss arrives via `onEngineLost`.
+    if (!media) return;
     const identity = makeTrackIdentity(media.pageUrl, media.title, media.duration);
-    this.#media = media;
-    if (this.#identity?.key === identity.key) { this.#identity = identity; return; }
+    if (this.#identity?.key === identity.key) { this.#media = media; this.#identity = identity; return; }
+    // Flushed against the outgoing track's media: `#save` reads `#media` for the
+    // saved pageUrl and thumbnail, so replacing it first files this song's URL
+    // under the previous song's identity.
     this.#flushParams();
+    this.#media = media;
     this.#identity = identity;
     this.#hasSavedParams = false;
     const generation = ++this.#generation;
@@ -69,7 +75,9 @@ class TrackSync {
       this.#chordsEnabled = chords.enabled;
       const params = practice?.params ?? (settings.current.autoReset ? DEFAULT_PARAMS :
         settings.current.rememberSettings ? settings.current.lastUsedParams : undefined);
-      if (params) session.patchParams(structuredClone(params));
+      // $state.snapshot, not structuredClone: `settings.current` is a rune, so
+      // `lastUsedParams` is a proxy and structuredClone throws on it.
+      if (params) session.patchParams($state.snapshot(params) as EffectParams);
     } finally {
       // A newer track already owns the flag; only its own load may clear it.
       if (generation === this.#generation) this.#restoring = false;

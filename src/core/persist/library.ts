@@ -108,7 +108,7 @@ function prune(library: Library, at: number): void {
     .filter((key) => !kept.has(key) && shared.songs[key].practice.value !== null)
     .sort((a, b) => (local.lastAccessed[b] ?? 0) - (local.lastAccessed[a] ?? 0));
   for (const key of rest.slice(Math.max(0, SONG_LIMIT - kept.size))) {
-    shared.songs[key] = { practice: cell(null, at), favorite: cell(false, at) };
+    defineEntry(shared.songs, key, { practice: cell(null, at), favorite: cell(false, at) });
   }
   const deleted = Object.keys(shared.songs).filter((key) => shared.songs[key].practice.value === null)
     .sort((a, b) => shared.songs[b].practice.at - shared.songs[a].practice.at);
@@ -121,6 +121,16 @@ function prune(library: Library, at: number): void {
   // A star that no longer names a saved song only costs sync bytes.
   const order = shared.favoriteOrder.value.filter((key) => shared.songs[key]?.favorite.value);
   if (order.length !== shared.favoriteOrder.value.length) shared.favoriteOrder = cell(order, at);
+}
+
+/** Every path that writes the library prunes, not only edits: a merge or a
+ * migration can carry in more songs than the sync limits allow, and nothing else
+ * would ever bring it back under them. Idempotent — with nothing to drop the
+ * result is identical, so it never manufactures a write of its own. */
+export function pruned(library: Library, now = Date.now()): Library {
+  const next = structuredClone(library);
+  prune(next, nextRevision(next.shared, now));
+  return next;
 }
 
 /** Called only by the background writer. Incoming edits patch current saved data. */
@@ -137,7 +147,7 @@ export function applyCommand(library: Library, command: LibraryCommand, now = Da
         markers: [], snippets: [], sequenceLoop: false, sequenceCountIn: false,
       };
       song.practice = cell({ ...base, ...command.patch, identity: command.identity }, at);
-      shared.songs[key] = song;
+      defineEntry(shared.songs, key, song);
       if (command.recent || key in local.recent) local.recent[key] = now;
       local.lastAccessed[key] = now;
       const keep = Object.entries(local.recent).sort((a, b) => b[1] - a[1]).slice(0, HISTORY_LIMIT);
@@ -189,7 +199,7 @@ export function applyCommand(library: Library, command: LibraryCommand, now = Da
       // Replacement names the records this device knows; absence is never a remote delete.
       for (const key of new Set([...Object.keys(shared.songs), ...Object.keys(file.shared.songs)])) {
         const song = file.shared.songs[key];
-        shared.songs[key] = { practice: cell(song?.practice.value ?? null, revision), favorite: cell(song?.favorite.value ?? false, revision) };
+        defineEntry(shared.songs, key, { practice: cell(song?.practice.value ?? null, revision), favorite: cell(song?.favorite.value ?? false, revision) });
       }
       for (const name of new Set([...Object.keys(shared.presets), ...Object.keys(file.shared.presets)])) {
         defineEntry(shared.presets, name,

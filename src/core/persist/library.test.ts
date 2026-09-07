@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyCommand, canonical, emptyLibrary, favoriteEntries, mergeShared, nextRevision, recentEntries } from './library.ts';
+import { applyCommand, canonical, cell, emptyLibrary, favoriteEntries, mergeShared, nextRevision, pruned, recentEntries } from './library.ts';
 import { migrateBackup } from './library-migration.ts';
 import { parseBackupJson } from './backup-codec.ts';
 import { DEFAULT_PARAMS, DEFAULT_SETTINGS, DEFAULT_UI_PREFS, DELETION_LIMIT, SONG_LIMIT } from '../model/defaults.ts';
@@ -133,4 +133,31 @@ test('preset names are data, including names matching object properties', () => 
   for (const name of ['constructor', '__proto__']) library = applyCommand(library, { type: 'preset', name, gains: [1] });
   assert.deepEqual(Object.keys(library.shared.presets), ['constructor', '__proto__']);
   assert.deepEqual(mergeShared(emptyLibrary().shared, library.shared).presets, library.shared.presets);
+});
+
+test('every write path prunes, so a merge or migration cannot leave the library oversized', () => {
+  const track = (n: number) => makeTrackIdentity('https://www.youtube.com/watch?v=p' + n, 'Song ' + n, 200);
+  // Built directly: a merge or a migration lands songs without going through
+  // applyCommand, which is the only place that used to prune.
+  const oversized = emptyLibrary();
+  for (let n = 0; n < SONG_LIMIT + DELETION_LIMIT + 50; n++) {
+    const key = track(n).key;
+    oversized.shared.songs[key] = { practice: cell({ identity: track(n), pageUrl: track(n).normalizedUrl,
+      markers: [], snippets: [], sequenceLoop: false, sequenceCountIn: false }, 100 + n), favorite: cell(false, 100) };
+    oversized.local.lastAccessed[key] = 100 + n;
+  }
+  const trimmed = pruned(oversized, 1000);
+  assert.ok(Object.keys(trimmed.shared.songs).length <= SONG_LIMIT + DELETION_LIMIT);
+  assert.equal(canonical(pruned(trimmed, 2000)), canonical(trimmed), 'idempotent, so it never manufactures a write');
+});
+
+test('an imported tombstone cannot name an arbitrary object property', () => {
+  const backup = { format: 'note-by-note-backup', version: 4, exportedAt: 100, ...structuredClone(save()) };
+  // A deleted song carries no identity to check the key against, so the key
+  // shape is the only thing standing between a file and the songs map.
+  Object.defineProperty(backup.shared.songs, '__proto__', {
+    value: { practice: { at: 0, value: null }, favorite: { at: 0, value: false } },
+    enumerable: true, writable: true, configurable: true,
+  });
+  assert.throws(() => parseBackupJson(backup), /song key/);
 });

@@ -56,6 +56,10 @@ export function parseShared(value: unknown): SharedLibrary {
     song.favorite = versioned(song.favorite);
     if (typeof song.favorite.value !== 'boolean') throw new Error('Damaged favorite.');
     const practice = song.practice.value;
+    // Checked ahead of the tombstone skip: a deleted song carries no identity to
+    // match the key against, so the shape is all that stands between an imported
+    // file and an arbitrary property name in the songs map.
+    if (!/^(yt|file|web):/.test(key)) throw new Error('Damaged song key.');
     if (practice === null) continue;
     object(practice);
     const identity = object(practice.identity);
