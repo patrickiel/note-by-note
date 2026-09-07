@@ -22,9 +22,7 @@
   const mock = params.has('mock');
   // ?mock=1&play=1 also runs the playhead, for previewing time-driven UI.
   const mockPlay = mock && params.has('play');
-  // Storage first, then the features: a migration rewrites what they are about
-  // to read (see core/persist/migrate.ts). Each panel feature then loads its
-  // own storage concurrently (see core/features.ts).
+  // Feature stores load projections from the background-owned library.
   const loadFeatures = () => Promise.all(features.map((f) => f.init?.()));
   const ready = loadFeatures().then(
     async () => {

@@ -51,21 +51,8 @@ function hash(text: string): string {
   return (h >>> 0).toString(16);
 }
 
-/**
- * What makes a song itself: its normalized URL and its title, hashed. This is
- * `TrackIdentity.key` — the storage key of its track record, the id every
- * library list is matched on, and what a tombstone names. One key, so no two
- * parts of the app can disagree about what counts as the same song.
- *
- * **Duration is not in it.** It drifts — a pre-roll ad, metadata that settles
- * late — and a key that moved with it split one song across several records,
- * which every list then had to work around. Duration is metadata now: stored,
- * shown, and updated in place.
- *
- * The title is in it because the URL alone is not enough: every local file
- * reports the local-player page URL and is told apart only by its title, and
- * a page can hold more than one song.
- */
+/** Web media use a stable URL/provider ID; title and duration are metadata.
+ * Local files retain the existing filename discriminator. */
 export function songKey(identity: Pick<TrackIdentity, 'normalizedUrl' | 'title'>): string {
   const url = identity.normalizedUrl;
   if (url.startsWith('https://youtube.com/watch?v=')) return 'yt:' + url.slice('https://youtube.com/watch?v='.length);

@@ -24,9 +24,7 @@ export interface PanelFeature {
   onDisconnect?(): void;
 }
 
-/** Every panel feature that contributes boot init or engine-event routing.
- * (Features whose only per-track state is swapped by track-sync — markers,
- * snippets — register there instead, via core/persist/track-data.ts.) */
+/** Panel boot and engine-event contributions. */
 export const features: PanelFeature[] = [
   settingsFeature,
   libraryFeature,

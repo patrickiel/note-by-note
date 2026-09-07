@@ -8,8 +8,7 @@ import type { Library } from '../../../core/persist/library';
 const GAIN_EPSILON = 0.01;
 
 class EqPresetsStore {
-  /** Live presets only — the stored list also carries deletion tombstones
-   * (`deletions.ts`). */
+  /** Projection of non-deleted presets. */
   saved = $state<EqPreset[]>([]);
 
   async init() {

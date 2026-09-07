@@ -75,10 +75,6 @@ class SessionStore {
 
   /** Persistence hooks (set by track-sync). */
   onMediaEvent: ((media: MediaInfo | null) => void) | null = null;
-  /** Every change to `media`, the connection layer's outright clears
-   * included — where `onMediaEvent` is only the engine's own media messages.
-   * Set by the panel root for whoever needs to know a track went away. */
-  onMediaChanged: ((media: MediaInfo | null) => void) | null = null;
   onUserParamsChange: (() => void) | null = null;
   /** The engine link dropped. Whatever reconnects starts on the default preset,
    * so the track's saved settings have to go back on even if it never changed. */

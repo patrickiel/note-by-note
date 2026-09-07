@@ -17,6 +17,7 @@ class TrackSync {
   #generation = 0;
   #restoring = false;
   #edited = false;
+  #hasSavedParams = false;
   #chordsEnabled = false;
 
   init() {
@@ -47,10 +48,12 @@ class TrackSync {
     if (this.#identity?.key === identity.key) { this.#identity = identity; return; }
     this.#identity = identity;
     this.#edited = false;
+    this.#hasSavedParams = false;
     const generation = ++this.#generation;
     const saved = await readLibrary();
     if (generation !== this.#generation || this.#edited) return;
     const practice = saved.shared.songs[identity.key]?.practice.value;
+    this.#hasSavedParams = !!practice?.params;
     this.#restoring = true;
     try {
       markers.load(practice?.markers ?? []);
@@ -76,6 +79,8 @@ class TrackSync {
   #save(patch: Partial<Practice>) {
     if (!this.#identity || this.#restoring) return;
     this.#edited = true;
+    if (!this.#hasSavedParams) patch = { params: $state.snapshot(session.params), ...patch };
+    this.#hasSavedParams = true;
     void editLibrary({ type: 'practice', identity: this.#identity,
       patch: { ...patch, pageUrl: this.#media?.pageUrl ?? this.#identity.normalizedUrl,
         thumbnailUrl: this.#media?.thumbnailUrl }, recent: settings.current.autoSave,

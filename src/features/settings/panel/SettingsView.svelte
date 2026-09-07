@@ -136,8 +136,6 @@
     notice = null;
     try {
       const backup = await createBackup();
-      // The compact form — a fraction of the verbose one and the shape that
-      // will ride the browser's sync storage; import reads both.
       const text = JSON.stringify(backup, null, 2);
       const blob = new Blob([text], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -167,9 +165,6 @@
       const ok = confirm(
         'Replace all settings, history, favorites, presets, markers and snippets ' +
           'with the contents of this file? Your current data is lost.' +
-          // The import records what it drops (`deletions.ts`), and those
-          // records travel — so with sync on this is not only about this
-          // device, and the prompt has to say so.
           (sync.enabled ? ' The replacement of saved practice data, favorites, presets and settings also syncs.' : ''),
       );
       if (!ok) return;
@@ -518,9 +513,9 @@
             {:else if sync.status === 'error'}
               {sync.lastError}
             {:else if sync.lastSyncedAt}
-              Last synced {lastSynced(sync.lastSyncedAt)} · {sync.usedPercent}% of 100 KB used
+              Last checked {lastSynced(sync.lastSyncedAt)} · {sync.usedPercent}% of 100 KB used
             {:else}
-              Nothing synced yet
+              Not checked yet
             {/if}
           </span>
           <button

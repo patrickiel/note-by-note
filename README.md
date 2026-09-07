@@ -117,8 +117,7 @@ the engine.
 ## Tests
 
 `pnpm test:dsp` runs the unit tests under `node --test`: the center-cut
-math, the CQT, chord decoding, the compact backup codec and the sync
-fit-to-budget logic. Fast, no browser.
+math, the CQT, chord decoding, library migration, merge rules, backups and independent sync records. Fast, no browser.
 
 The e2e harness is the interesting one. It launches Chrome for Testing with the
 extension installed, plays a 440 Hz tone, and asserts on the *processed output* —
@@ -169,30 +168,30 @@ the other way round.
 
 ## Sync
 
-There is no server. Cross-device sync writes a compact, gzipped copy of your
-data into the browser's synced extension storage (`browser.storage.sync`), and
-the browser vendor's sync — Chrome sync, Firefox Sync — carries it to the other
-devices signed into the same profile. No account with us, no ID to paste, no
-network request of the extension's own; nothing in the extension talks to the
-network at all, and there is no telemetry.
+Saved practice data, favorites, EQ presets and settings sync through the browser's
+own extension storage. Recent, panel layout, last-used parameters and generated
+chord analysis stay on the device. Audio is never transferred.
 
-A copy is your settings, UI preferences, EQ presets, Recent and Favorites (page
-URL, title, duration) and per-track data (markers with your labels, loop
-ranges, snippets, chord charts). **No audio, ever.** It is stored in the
-compact backup format ([backup-codec.ts](src/core/persist/backup-codec.ts) —
-the same file `Settings → Export` writes), which is ~9× smaller than the raw
-data, so even a few hundred songs with chord charts fit the browser's 100 KB
-quota; if a library still doesn't, the oldest songs, then the oldest chord
-charts, stay on the device that has them ([fit.ts](src/features/sync/persist/fit.ts)).
+One saved song owns its parameters, markers and snippets. Recent and Favorites
+are views of that song, so there are no saved-settings copies to keep aligned.
+The background is the only library writer; it handles edits, imports and remote
+updates even when the panel is closed. An active practice session keeps its loaded
+configuration until the song is reopened. Sync never reloads the panel.
 
-Two devices' copies are merged rather than overwritten
-([merge.ts](src/features/sync/persist/merge.ts)): the more recently edited
-version of each song wins, and a song you removed on one device stays removed —
-a removal is kept as a dated, empty row rather than a gap, so a merge can tell
-it from "never had it" ([deletions.ts](src/core/persist/deletions.ts)). The
-merge reads nothing but the two copies, so both devices work out the same
-answer. Sync is on by default; `Settings → Sync` turns it off, and `Delete
-synced data` empties the synced copy.
+Each song is a complete, independently compressed sync item. Practice edits and
+favorite membership have separate revisions; preset deletion is an explicit null.
+Revisions advance past everything a device has observed, with deterministic ties.
+There is no whole-library blob, chunk assembly, automatic trimming or timed
+expiry of deletion records. If a record or library exceeds the browser's capacity,
+local data remains saved and Settings reports the error. Export a backup to transfer
+all data, including local history and analysis.
+
+Backups are readable version-4 JSON containing shared and local sections. Imports
+accept the previously supported v1/v3 formats and convert them once. Replacing a
+backup replaces this device's library and dates the named changes for sync; it does
+not delete songs known only to another device. Old local storage is retained as a
+recovery copy after the first migration. Upgrade all devices before using the new
+sync format; older builds cannot read it.
 
 ## License
 
