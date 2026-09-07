@@ -45,13 +45,13 @@ This is a **multi-context extension**. The single most important structural fact
 
 ### Source layout (vertical feature slices)
 The tree is organized by **feature**, not by layer:
-- **`src/core/`** — shared platform: `engine/` (controller, media-engine/-detect, attach-audio), `audio/` (pipeline, fft, silence-detector), `messaging/` (protocol shell, ports, rpc), `model/` (shared types + defaults + format + track-identity + thumbnail), `persist/` (library, backup, migration), `state/` (session, track-sync, connect, view), and `features.ts` (the panel-feature registry).
-- **`src/features/<feature>/`** — one folder per product feature (chords, pitch, speed, vocal-reducer, eq, loops, markers, snippets, count-in, library, sync, settings, shortcuts), each with an `engine/` subfolder (content-script code: worklets, schedulers, DSP factories) and/or a `panel/` subfolder (side-panel stores + components), plus optional `protocol.ts` (its wire-message fragment), `panel/panel.ts` (registration object). **`engine/` and `panel/` never cross-import**, so the content and panel bundles stay separate.
+- **`src/core/`** — shared platform: `engine/` (controller, media-engine/-detect, attach-audio), `audio/` (pipeline, fft, silence-detector), `messaging/` (protocol shell, ports, rpc), `model/` (shared types + defaults + format + track-identity + thumbnail), `persist/` (library, backup, migration), and `state/` (session, library, track-sync, connect, view).
+- **`src/features/<feature>/`** — one folder per product feature (chords, pitch, speed, vocal-reducer, eq, loops, markers, snippets, count-in, library, sync, settings, shortcuts), each with an `engine/` subfolder (content-script code: worklets, schedulers, DSP factories) and/or a `panel/` subfolder (side-panel stores + components), plus optional `protocol.ts` (its wire-message fragment). **`engine/` and `panel/` never cross-import**, so the content and panel bundles stay separate.
 - **`src/ui/`** — shared/presentational UI (Workspace, Panel, PanelStack, Timeline, chrome bars, `shared/` primitives, icons, dismiss).
 - **`src/dev/`** — preview-only helpers (`browser-shim`, `mock`).
 - **`src/entrypoints/`** — thin WXT composition roots (unchanged location).
 
-**Dependency direction:** `entrypoints → core composition roots (pipeline, controller, protocol, App, features.ts, track-sync) → features → core primitives (model, messaging, audio/fft, ui)`. Composition roots **import feature contributions** (the "light registration"); **features never import the orchestrators**. Domain types stay central in `core/model/types.ts` (they are the shared engine↔panel wire + persistence contract).
+**Dependency direction:** `entrypoints → core composition roots (pipeline, controller, protocol, App, track-sync) → features → core primitives (model, messaging, audio/fft, ui)`. Composition roots wire feature behavior directly; features never import the orchestrators. Domain types stay central in `core/model/types.ts` (the shared engine↔panel contract).
 
 ### Execution contexts (`src/entrypoints/`)
 - **`sidepanel/`** — the Svelte UI. Holds no engine state of its own; mirrors the active tab's engine.
@@ -91,29 +91,31 @@ Both worklet processors are shipped as **static files under `public/worklets/`**
 
 ### State layer (Svelte 5 runes stores, `*.svelte.ts`)
 Runes stores (classes with `$state`), one singleton exported per file. All panel-side. Split by ownership:
-- **Core (`src/core/state/`):** `session` — mirror of the active tab's engine + the command surface panels call (while no engine is attached, commands fall back to **optimistic local state**, staged and pushed on connect); `connection` (`connect.svelte.ts`) — owns the port lifecycle (one `<all_urls>` prompt from the banner's Connect button in a user gesture, injection, reconnect, capture start/stop; a `#generation` counter drops stale async work) and iterates the **panel-feature registry** ([core/features.ts](src/core/features.ts)) to route engine events into feature stores; `track-sync` — reacts to track changes (auto-save to Recent, reset/remember/carry-over params) loads saved practice data and wires feature edits directly; `view`.
+- **Core (`src/core/state/`):** `session` mirrors the active tab's engine and provides panel commands; `library` holds the panel's single saved-data snapshot; `connection` owns permissions, injection, port lifecycle and capture, routing chord events directly; `track-sync` loads saved practice data and wires feature edits; `view` selects the open panel.
 - **Feature-owned (`src/features/<f>/panel/`):** `markers`, `snippets`, `chords`, `settings`, `favorites`/`history` (library), `eq-presets`, `shortcuts`. Preview data (`mock`) lives in `src/dev/`.
-- Features contribute boot init + event routing via `panel/panel.ts` (registered in `core/features.ts`) and submit per-track edits through track-sync.
+- App loads the library once. Settings, UI preferences, presets and song lists derive from it; App effects apply the theme and send engine settings. Features submit per-track edits through track-sync.
 
 ### Persistence & sync
 
 - One local library owns shared songs/settings/presets/order and device-local Recent,
   UI preferences, last-used parameters and analysis. See core/persist/library.ts.
 - The background service is the only writer (library-background.ts). Panels use
-  library-client.ts commands and storage watches. Commands patch the latest saved
+  library-client.ts commands and one storage watch. Commands patch the latest saved
   data; Recent and Favorites are projections, not persistent song copies.
 - Track-sync loads a practice session once and submits edits to the saved library.
   Receiving remote changes never reloads or silently replaces the active session.
   Feature persistence is wired directly in track-sync; there is no descriptor registry.
-- Sync stores independent gzip-compressed records in browser.storage.sync (records.ts).
-  Versioned practice and favorite values merge independently. Explicit null/false
-  deletions are retained. There is no global blob. Because the browser caps sync at
-  512 items, library.ts prune() keeps a song while it is favorited, in Recent, or
-  among the SONG_LIMIT most recently opened, and retains only the newest
-  DELETION_LIMIT deletions (defaults.ts). Quota failures leave local data intact.
-  Background alarms retry independently of panels.
-- Backups use the readable v4 library schema. legacy-backup.ts only reads v1, the
-  format every released build wrote; library-migration.ts collapses old copies once.
+- Sync copies the same SharedLibrary snapshot used locally (records.ts). One
+  updatedAt timestamp chooses the whole winner; equal dates adopt the remote copy.
+  There are no field merges, deletion markers, or automatic song pruning. Song
+  dates only support display and sorting. Gzip data spans fixed size-limited slots;
+  a hash prevents partial or mixed snapshots from being applied. Capacity failures
+  preserve local data and the last successful upload. Background alarms retry
+  independently of panels.
+- Backups use the readable v2 library schema. legacy-backup.ts reads the
+  released v1 format, and
+  library-migration.ts collapses its old copies once.
+  Only released formats need compatibility adapters; intermediate PR formats do not.
   Old local storage is retained for recovery, but only local:library is used after
   migration.
 - Web identity uses provider ID/normalized URL. Title and duration are metadata.

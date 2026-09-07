@@ -8,9 +8,9 @@
   import { sendMessage } from '@/core/messaging/rpc';
   import { openTabWithPanel } from '@/core/side-panel';
   import { installMockState, installMockTicker } from '@/dev/mock';
-  import { connection } from '@/core/state/connect.svelte';
+  import { connection, pushSettings } from '@/core/state/connect.svelte';
   import { CAN_CAPTURE_TAB } from '@/core/platform';
-  import { features } from '@/core/features';
+  import { library } from '@/core/state/library.svelte';
   import { session } from '@/core/state/session.svelte';
   import { applyTheme, settings } from '@/features/settings/panel/settings.svelte';
   import { installShortcuts } from '@/features/shortcuts/panel/shortcuts';
@@ -22,10 +22,11 @@
   const mock = params.has('mock');
   // ?mock=1&play=1 also runs the playhead, for previewing time-driven UI.
   const mockPlay = mock && params.has('play');
-  // Feature stores load projections from the background-owned library.
-  const ready = Promise.all(features.map((f) => f.init?.())).then(
+  $effect(() => applyTheme(settings.current.theme));
+  $effect(pushSettings);
+
+  const ready = library.init().then(
     async () => {
-      applyTheme(settings.current.theme);
       trackSync.init();
       session.onMediaEvent = (media) => {
         trackSync.onMedia(media).catch((err: unknown) => {

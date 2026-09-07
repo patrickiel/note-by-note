@@ -17,29 +17,14 @@ const BACKUP_FORMAT = 'note-by-note-backup';
 
 const BACKUP_VERSION = 1;
 
-/** Rows in a v1 file carry sync bookkeeping the live model no longer has: a
- * tombstone told an old merge "removed" from "never had it", and every row and
- * section carried its own date. `library-migration.ts` reads them once, here. */
-export interface LegacyHistoryEntry extends HistoryEntry {
-  deleted?: true;
-}
-export interface LegacyFavoriteEntry extends FavoriteEntry, LegacyHistoryEntry {
-  /** When the manual order this row sat in was last set. */
-  orderedAt?: number;
-}
-export interface LegacyEqPreset extends EqPreset {
-  updatedAt?: number;
-  deleted?: true;
-}
-
 export interface Backup {
   format: typeof BACKUP_FORMAT;
   version: number;
-  settings: Settings & { updatedAt?: number };
+  settings: Settings;
   uiPrefs: UiPrefs;
-  history: LegacyHistoryEntry[];
-  favorites: LegacyFavoriteEntry[];
-  eqPresets: LegacyEqPreset[];
+  history: HistoryEntry[];
+  favorites: FavoriteEntry[];
+  eqPresets: EqPreset[];
   /** Per-track markers and snippets, one entry per saved track. */
   tracks: TrackData[];
 }
@@ -73,14 +58,14 @@ function normalizeV1(raw: Record<string, unknown>): Backup {
     settings: {
       ...DEFAULT_SETTINGS,
       ...(isRecord(raw.settings) ? raw.settings : {}),
-    } as Settings & { updatedAt?: number },
+    } as Settings,
     uiPrefs: {
       ...(JSON.parse(JSON.stringify(DEFAULT_UI_PREFS)) as UiPrefs),
       ...(isRecord(raw.uiPrefs) ? raw.uiPrefs : {}),
     },
-    history: rekeyByIdentity(identifiedArr<LegacyHistoryEntry>(raw.history, 'history')),
-    favorites: rekeyByIdentity(identifiedArr<LegacyFavoriteEntry>(raw.favorites, 'favorites')),
-    eqPresets: arr(raw.eqPresets, 'eqPresets') as LegacyEqPreset[],
+    history: rekeyByIdentity(identifiedArr<HistoryEntry>(raw.history, 'history')),
+    favorites: rekeyByIdentity(identifiedArr<FavoriteEntry>(raw.favorites, 'favorites')),
+    eqPresets: arr(raw.eqPresets, 'eqPresets') as EqPreset[],
     tracks: rekeyByIdentity(identifiedArr<TrackData>(raw.tracks, 'tracks')),
   };
 }

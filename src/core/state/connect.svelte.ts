@@ -1,7 +1,7 @@
 import { UI_PORT, type EngineCommand, type EngineEvent } from '../messaging/protocol';
 import { connectToTab, type TypedPort } from '../messaging/ports';
 import { sendMessage } from '../messaging/rpc';
-import { features } from '../features';
+import { chords } from '../../features/chords/panel/chords.svelte';
 import { session } from './session.svelte';
 import { settings } from '../../features/settings/panel/settings.svelte';
 
@@ -16,7 +16,7 @@ function isLocalPlayer(url: string | undefined): boolean {
 
 /** A fresh engine starts on the default preset, so this runs on every attach as
  * well as on change — a no-op while nothing is attached. */
-function pushSettings() {
+export function pushSettings() {
   session.send({
     type: 'settings',
     seekInterval: settings.current.seekInterval,
@@ -39,8 +39,6 @@ class ConnectionManager {
   #generation = 0;
 
   async init() {
-    settings.onChange = pushSettings;
-
     // Chromium opens one panel document per tab at `sidepanel.html?tabId=N`
     // (see core/side-panel.ts): pin to that tab. Hidden behind another tab
     // this document stays alive, and following activation there would leave
@@ -137,10 +135,8 @@ class ConnectionManager {
     this.#port = port;
     port.onMessage((event) => {
       session.apply(event);
-      // Feature-owned traffic that lives outside the session mirror (e.g. the
-      // chords store) is routed through the panel feature registry.
-      for (const f of features) f.routeEvent?.(event);
-      if (event.type === 'snapshot') for (const f of features) f.onSnapshot?.(event);
+      if (event.type === 'pcm') chords.pushPcm(event.samples, event.sampleRate, event.t, event.speed);
+      if (event.type === 'snapshot') chords.syncActive(event.chordActive);
       if (event.type === 'state' || event.type === 'snapshot') {
         void this.#refineNoPlayer();
       }
@@ -149,7 +145,7 @@ class ConnectionManager {
       if (this.#port !== port) return;
       this.#port = null;
       session.detachTransport();
-      for (const f of features) f.onDisconnect?.();
+      chords.onDisconnect();
       if (session.connection !== 'restricted' && session.connection !== 'idle') {
         session.connection = 'stale';
       }

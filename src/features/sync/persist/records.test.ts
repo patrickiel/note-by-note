@@ -1,84 +1,70 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyCommand, emptyLibrary, canonical } from '../../../core/persist/library.ts';
+import { randomBytes } from 'node:crypto';
+import { applyCommand, emptyLibrary } from '../../../core/persist/library.ts';
 import { makeTrackIdentity } from '../../../core/model/track-identity.ts';
-import { changedRecords, readRecords, bytesUsed } from './records.ts';
+import { encodeSnapshot, readSnapshot, bytesUsed, IncompleteSnapshot, PREFIX, SNAPSHOT_KEY } from './records.ts';
 
-const song = (id: number) => makeTrackIdentity('https://youtube.com/watch?v=song' + id, 'Song', 200);
-test('records round-trip independently, and an unchanged copy has nothing to upload', async () => {
-  const library = applyCommand(emptyLibrary(), { type: 'practice', identity: song(1), patch: {}, recent: true });
-  const { changes: items } = await changedRecords(library.shared, emptyLibrary().shared, {});
-  const restored = await readRecords(items);
-  assert.equal(canonical(restored), canonical(library.shared));
-  assert.deepEqual((await changedRecords(library.shared, restored, items)).changes, {});
-  const edited = applyCommand(library, { type: 'favorite', key: song(1).key, value: true });
-  const { changes } = await changedRecords(edited.shared, restored, items);
-  assert.deepEqual(Object.keys(changes), ['nbn4:order', 'nbn4:song:' + song(1).key]);
-  assert.ok(bytesUsed(items) < 8192);
+const song = makeTrackIdentity('https://youtube.com/watch?v=song', 'Song', 200);
+const save = (label = '', now = 100) => applyCommand(emptyLibrary(), {
+  type: 'practice', identity: song, patch: { markers: [{ id: 'm', t: 1, label }] }, recent: true,
+}, now).shared;
+
+test('sync round-trips exactly the shared snapshot, including large songs across chunks', async () => {
+  const shared = save(randomBytes(18000).toString('base64'));
+  const { items, usedBytes } = await encodeSnapshot(shared);
+  assert.deepEqual(await readSnapshot(items), shared);
+  assert.ok((items[SNAPSHOT_KEY] as { chunks: number }).chunks > 1);
+  assert.equal(usedBytes, bytesUsed(items));
+  for (const [key, value] of Object.entries(items)) assert.ok(bytesUsed({ [key]: value }) <= 8192);
+  assert.deepEqual((await encodeSnapshot(shared, items)).items, items);
 });
 
-test('partial arrival yields complete individual songs, with no global blob to assemble', async () => {
-  let library = emptyLibrary();
-  for (const n of [1, 2]) library = applyCommand(library, { type: 'practice', identity: song(n), patch: {}, recent: true });
-  const { changes: items } = await changedRecords(library.shared, emptyLibrary().shared, {});
-  const key = 'nbn4:song:' + song(2).key;
-  const partial = await readRecords({ [key]: items[key] });
-  assert.deepEqual(Object.keys(partial.songs), [song(2).key]);
+test('missing, reordered and mixed chunks never produce a partial library', async () => {
+  const { items } = await encodeSnapshot(save(randomBytes(18000).toString('base64')));
+  const missing = { ...items };
+  delete missing[PREFIX + 'chunk:1'];
+  await assert.rejects(readSnapshot(missing), IncompleteSnapshot);
+  const noHeader = { ...items };
+  delete noHeader[SNAPSHOT_KEY];
+  await assert.rejects(readSnapshot(noHeader), IncompleteSnapshot);
+  const { items: other } = await encodeSnapshot(save('other device at the same timestamp'));
+  await assert.rejects(readSnapshot({ ...items, [PREFIX + 'chunk:0']: other[PREFIX + 'chunk:0'] }), IncompleteSnapshot);
+  const reversed = Object.fromEntries(Object.entries(items).reverse());
+  assert.deepEqual(await readSnapshot(reversed), await readSnapshot(items));
 });
 
-test('capacity failure leaves the library intact and never silently trims records', async () => {
-  const library = applyCommand(emptyLibrary(), { type: 'practice', identity: song(1), patch: {}, recent: true });
-  const before = canonical(library);
-  await assert.rejects(changedRecords(library.shared, emptyLibrary().shared, { unrelated: 'x'.repeat(102400) }), /storage is full/);
-  assert.equal(canonical(library), before);
+test('a smaller replacement clears all old chunks in the same write', async () => {
+  const { items: large } = await encodeSnapshot(save(randomBytes(18000).toString('base64')));
+  const small = applyCommand({ shared: save(), local: emptyLibrary().local }, { type: 'import', library: emptyLibrary() }, 200).shared;
+  const { items } = await encodeSnapshot(small, large);
+  assert.equal(items[PREFIX + 'chunk:1'], '');
+  assert.deepEqual(await readSnapshot({ ...large, ...items }), small);
 });
 
-test('a record too large to sync is reported and left behind, never blocking the rest', async () => {
-  let library = applyCommand(emptyLibrary(), { type: 'practice', identity: song(1), patch: {}, recent: true });
-  const markers = Array.from({ length: 2000 }, (_, n) => ({ id: 'm' + n, t: n, label: 'Marker ' + n }));
-  library = applyCommand(library, { type: 'practice', identity: song(2), patch: { markers }, recent: true });
-  const { changes, skipped } = await changedRecords(library.shared, emptyLibrary().shared, {});
-  assert.deepEqual(skipped, ['nbn4:song:' + song(2).key]);
-  assert.ok(Object.keys(changes).includes('nbn4:song:' + song(1).key));
-  assert.equal(library.shared.songs[song(2).key].practice.value!.markers.length, 2000);
+test('capacity failures leave both the library and existing sync storage intact', async () => {
+  const shared = save(randomBytes(100000).toString('base64'));
+  const before = structuredClone(shared);
+  const { items: existing } = await encodeSnapshot(save('last complete upload'));
+  const existingBefore = structuredClone(existing);
+  await assert.rejects(encodeSnapshot(shared, existing), /storage is full/);
+  assert.deepEqual(shared, before);
+  assert.deepEqual(existing, existingBefore);
+  await assert.rejects(encodeSnapshot(save(), { unrelated: 'x'.repeat(102400) }), /storage is full/);
 });
 
-test('unsupported records are rejected before any application or upload', async () => {
-  await assert.rejects(readRecords({ 'nbn4:settings': { version: 5, data: '' } }), /Unsupported/);
+test('empty sync storage is distinct from a valid empty library or an incomplete transfer', async () => {
+  assert.equal(await readSnapshot({ unrelated: 'kept' }), null);
+  const { items } = await encodeSnapshot(emptyLibrary().shared);
+  assert.deepEqual(await readSnapshot(items), emptyLibrary().shared);
+  const broken = { ...items, [PREFIX + 'chunk:0']: '' };
+  await assert.rejects(readSnapshot(broken), (error: unknown) => error instanceof IncompleteSnapshot && error.updatedAt === 0);
 });
 
-test('a record the library no longer holds is removed remotely, not merged back', async () => {
-  const library = applyCommand(emptyLibrary(), { type: 'practice', identity: song(1), patch: {}, recent: true });
-  const { changes: items } = await changedRecords(library.shared, emptyLibrary().shared, {});
-  const remote = await readRecords(items);
-  // The song is gone locally: sync must drop it rather than read it back forever.
-  const { removals } = await changedRecords(emptyLibrary().shared, remote, items);
-  assert.deepEqual(removals, ['nbn4:song:' + song(1).key]);
-  // A record this build does not own belongs to a newer one and is left alone.
-  const foreign = { ...items, 'nbn4:future:1': { version: 4, data: '' } };
-  assert.ok(!(await changedRecords(library.shared, remote, foreign)).removals.includes('nbn4:future:1'));
-});
-
-test('one damaged record costs only itself, never the rest or the upload', async () => {
-  let library = emptyLibrary();
-  for (const n of [1, 2]) library = applyCommand(library, { type: 'practice', identity: song(n), patch: {}, recent: true });
-  const { changes: items } = await changedRecords(library.shared, emptyLibrary().shared, {});
-  const damaged = { ...items, ['nbn4:song:' + song(1).key]: { version: 4, data: 'not-gzip-at-all' } };
-  const remote = await readRecords(damaged);
-  assert.deepEqual(Object.keys(remote.songs), [song(2).key]);
-  // The undamaged song still round-trips, so this device is not locked out.
-  assert.equal(canonical(remote.songs[song(2).key]), canonical(library.shared.songs[song(2).key]));
-});
-
-test('over budget, songs are held back and reported; the small records still sync', async () => {
-  let library = emptyLibrary();
-  const markers = Array.from({ length: 300 }, (_, n) => ({ id: 'm' + n, t: n, label: 'Marker ' + n }));
-  for (const n of [1, 2, 3]) library = applyCommand(library, { type: 'practice', identity: song(n), patch: { markers }, recent: true });
-  const before = canonical(library);
-  const padded = { unrelated: 'x'.repeat(102400 - 3000) };
-  const { changes, skipped, usedBytes } = await changedRecords(library.shared, emptyLibrary().shared, padded);
-  assert.ok(skipped.length > 0, 'the songs that do not fit are reported');
-  assert.ok(Object.keys(changes).includes('nbn4:settings'), 'settings are small and always get through');
-  assert.ok(usedBytes <= 102400, 'what is written fits the quota');
-  assert.equal(canonical(library), before, 'nothing is trimmed from the library itself');
+test('unsupported and damaged snapshots fail before adoption or upload', async () => {
+  const { items } = await encodeSnapshot(save());
+  const header = items[SNAPSHOT_KEY] as Record<string, unknown>;
+  await assert.rejects(readSnapshot({ ...items, [SNAPSHOT_KEY]: { ...header, version: 2 } }), /Unsupported/);
+  await assert.rejects(readSnapshot({ ...items, [SNAPSHOT_KEY]: { ...header, chunks: 10000 } }), /Damaged/);
+  await assert.rejects(readSnapshot({ ...items, [SNAPSHOT_KEY]: { ...header, updatedAt: 999 } }), /revision/);
 });

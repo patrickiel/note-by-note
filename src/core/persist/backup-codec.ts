@@ -1,12 +1,12 @@
 import { DEFAULT_PARAMS, DEFAULT_SETTINGS, DEFAULT_UI_PREFS } from '../model/defaults.ts';
 import { songKey } from '../model/track-identity.ts';
-import { type Library, type SharedLibrary } from './library.ts';
+import type { Library, SharedLibrary } from './library.ts';
 import { parseBackupJson as parseLegacy } from './legacy-backup.ts';
 import { migrateBackup } from './library-migration.ts';
 
 export const BACKUP_FORMAT = 'note-by-note-backup';
-export const BACKUP_VERSION = 4;
-export interface Backup extends Library { format: typeof BACKUP_FORMAT; version: 4; exportedAt: number }
+export const BACKUP_VERSION = 2;
+export interface Backup extends Library { format: typeof BACKUP_FORMAT; version: typeof BACKUP_VERSION; exportedAt: number }
 
 function object(value: unknown): Record<string, any> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Damaged library data.');
@@ -22,15 +22,9 @@ function array(value: unknown): any[] {
   if (!Array.isArray(value)) throw new Error('Damaged library list.');
   return value;
 }
-function versioned(value: unknown) {
-  const item = object(value);
-  number(item.at);
-  if (item.at < 0 || !('value' in item)) throw new Error('Damaged library revision.');
-  return item;
-}
-/** Validate/backfill a JSON object against its version's defaults. */
+/** Missing preference groups use defaults, just like missing individual fields. */
 function defaults<T>(value: unknown, fallback: T): T {
-  const source = object(value);
+  const source = object(value ?? {});
   const result = structuredClone(fallback) as Record<string, any>;
   for (const [key, expected] of Object.entries(result)) {
     if (!(key in source)) continue;
@@ -46,22 +40,17 @@ function defaults<T>(value: unknown, fallback: T): T {
 }
 export function parseShared(value: unknown): SharedLibrary {
   const shared = structuredClone(object(value));
-  shared.settings = versioned(shared.settings);
-  shared.settings.value = defaults(shared.settings.value, DEFAULT_SETTINGS);
-  shared.favoriteOrder = versioned(shared.favoriteOrder);
-  array(shared.favoriteOrder.value).forEach(string);
+  number(shared.updatedAt);
+  if (shared.updatedAt < 0) throw new Error('Damaged library revision.');
+  shared.settings = defaults(shared.settings, DEFAULT_SETTINGS);
+  array(shared.favoriteOrder).forEach(string);
   for (const [key, raw] of Object.entries(object(shared.songs))) {
     const song = object(raw);
-    song.practice = versioned(song.practice);
-    song.favorite = versioned(song.favorite);
-    if (typeof song.favorite.value !== 'boolean') throw new Error('Damaged favorite.');
-    const practice = song.practice.value;
-    // Checked ahead of the tombstone skip: a deleted song carries no identity to
-    // match the key against, so the shape is all that stands between an imported
-    // file and an arbitrary property name in the songs map.
+    if (song.favoritedAt !== null) number(song.favoritedAt);
+    const practice = song.practice;
     if (!/^(yt|file|web):/.test(key)) throw new Error('Damaged song key.');
-    if (practice === null) continue;
     object(practice);
+    number(practice.updatedAt);
     const identity = object(practice.identity);
     string(identity.normalizedUrl); string(identity.title); number(identity.durationSec);
     if (key !== songKey(identity as any)) throw new Error('Song identity does not match its key.');
@@ -79,25 +68,23 @@ export function parseShared(value: unknown): SharedLibrary {
     if (typeof practice.sequenceLoop !== 'boolean' || typeof practice.sequenceCountIn !== 'boolean') throw new Error('Damaged sequence.');
     if (practice.chordsEnabled !== undefined && typeof practice.chordsEnabled !== 'boolean') throw new Error('Damaged chord setting.');
   }
-  for (const raw of Object.values(object(shared.presets))) {
-    const preset = versioned(raw);
-    if (preset.value !== null) array(preset.value).forEach(number);
-  }
-  return { settings: shared.settings, songs: shared.songs, presets: shared.presets, favoriteOrder: shared.favoriteOrder };
+  for (const preset of Object.values(object(shared.presets))) array(preset).forEach(number);
+  return { updatedAt: shared.updatedAt, settings: shared.settings, songs: shared.songs,
+    presets: shared.presets, favoriteOrder: shared.favoriteOrder };
 }
 export function parseLibrary(value: unknown): Library {
   const source = object(value);
-  const local = object(source.local);
-  const charts = object(local.charts);
+  const local = object(source.local ?? {});
+  const charts = object(local.charts ?? {});
   for (const chart of Object.values(charts)) {
     if (chart === null) continue;
     object(chart); number(chart.computedAt); number(chart.coverage); number(chart.analyzedFrom); number(chart.analyzedTo);
     array(chart.segments).forEach((s) => { object(s); number(s.startT); number(s.endT); string(s.label); number(s.confidence); });
     if (chart.key !== null) { object(chart.key); string(chart.key.tonic); string(chart.key.mode); number(chart.key.confidence); }
   }
-  const recent = object(local.recent);
+  const lastAccessed = object(local.lastAccessed ?? {});
+  const recent = object(local.recent ?? {});
   Object.values(recent).forEach(number);
-  const lastAccessed = object(local.lastAccessed);
   Object.values(lastAccessed).forEach(number);
   return {
     shared: parseShared(source.shared),
@@ -109,6 +96,6 @@ export function parseBackupJson(value: unknown): Backup {
   const raw = object(value);
   if (raw.format !== BACKUP_FORMAT) throw new Error("That file isn't a Note by Note backup.");
   if (raw.version > BACKUP_VERSION) throw new Error('That backup was made by a newer version of Note by Note.');
-  const library = raw.version === BACKUP_VERSION ? parseLibrary(raw) : migrateBackup(parseLegacy(raw));
+  const library = parseLibrary(raw.version === BACKUP_VERSION ? raw : migrateBackup(parseLegacy(raw)));
   return { format: BACKUP_FORMAT, version: BACKUP_VERSION, exportedAt: raw.exportedAt ?? 0, ...library };
 }

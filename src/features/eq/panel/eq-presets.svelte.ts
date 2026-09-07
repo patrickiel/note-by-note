@@ -1,23 +1,14 @@
 import { BUILTIN_EQ_PRESETS, EQ_BANDS } from '../../../core/model/defaults';
 import type { EqPreset } from '../../../core/model/types';
-import { editLibrary, readLibrary, watchLibrary } from '../../../core/persist/library-client';
-import type { Library } from '../../../core/persist/library';
+import { editLibrary } from '../../../core/persist/library-client';
+import { library } from '../../../core/state/library.svelte';
 
 /** Slider gains are multiples of 0.5 dB, so anything closer than this is the
  * same curve; the tolerance only guards against float drift. */
 const GAIN_EPSILON = 0.01;
 
 class EqPresetsStore {
-  /** Projection of non-deleted presets. */
-  saved = $state<EqPreset[]>([]);
-
-  async init() {
-    const select = (library: Library): EqPreset[] => Object.entries(library.shared.presets)
-      .filter(([, preset]) => preset.value !== null)
-      .map(([name, preset]) => ({ name, gains: preset.value! }));
-    this.saved = select(await readLibrary());
-    watchLibrary(select, (value) => { this.saved = value; });
-  }
+  saved = $derived(Object.entries(library.current.shared.presets).map(([name, gains]) => ({ name, gains })));
 
   /** Built-ins first, then the user's, as listed in the dropdown. */
   get all(): EqPreset[] {

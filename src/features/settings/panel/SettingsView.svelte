@@ -19,7 +19,7 @@
     restoreBackup,
   } from '@/core/persist/backup';
   import { history } from '@/features/library/panel/history';
-  import { applyTheme, settings } from '@/features/settings/panel/settings.svelte';
+  import { settings } from '@/features/settings/panel/settings.svelte';
   import { session } from '@/core/state/session.svelte';
   import { view } from '@/core/state/view.svelte';
   import { sync } from '@/features/sync/panel/sync.svelte';
@@ -47,7 +47,7 @@
   let notice = $state<{ ok: boolean; text: string } | null>(null);
 
   /** UI-level view of the `autoReset` / `rememberSettings` pair, which the
-   * settings store keeps mutually exclusive. Both off = carry over. */
+   * background keeps mutually exclusive. Both off = carry over. */
   type NewSongBehavior = 'defaults' | 'keep' | 'lastUsed';
 
   const themeOptions: { value: Theme; label: string; icon: IconName }[] = [
@@ -89,11 +89,6 @@
     });
   }
 
-  function setTheme(value: Theme) {
-    void settings.update({ theme: value });
-    applyTheme(value);
-  }
-
   function setTabAudio(on: boolean) {
     void settings.update({ tabAudio: on });
     ontabaudio?.(on);
@@ -118,7 +113,6 @@
   function resetSettingsConfirmed() {
     if (!confirm('Restore all extension settings to their defaults?')) return;
     void settings.reset();
-    applyTheme('auto');
   }
 
   function revokeConfirmed() {
@@ -146,7 +140,7 @@
       // The download reads the blob after click() returns, so the URL has to
       // outlive this task.
       setTimeout(() => URL.revokeObjectURL(url), 0);
-      const songs = Object.values(backup.shared.songs).filter((song) => song.practice.value !== null).length;
+      const songs = Object.keys(backup.shared.songs).length;
       const kb = Math.max(1, Math.round(new TextEncoder().encode(text).length / 1024));
       notice = { ok: true, text: `Saved ${link.download} (${songs} songs, ${kb} KB).` };
     } catch (err) {
@@ -307,7 +301,7 @@
         <SegmentedControl
           options={themeOptions}
           value={settings.current.theme}
-          onchange={setTheme}
+          onchange={(theme) => void settings.update({ theme })}
         />
       </div>
       <div class="flex items-center gap-3 py-2.5 px-3 border-t border-line">
@@ -493,7 +487,7 @@
       <div class="flex items-center gap-3 py-2.5 px-3">
         {@render prefText(
           'Sync between devices',
-          "Sync saved practice settings, favorites, presets, markers and snippets. Recent, layout and chord analysis stay on this device. Uses your browser's built-in sync: sign in to the browser with sync turned on and it reaches your other devices. No account with us, no server.",
+          "Sync saved practice settings, favorites, presets, markers and snippets. The most recently edited library replaces the older copy, so changes made on two devices at once can overwrite each other. Recent, layout and chord analysis stay on this device. Uses your browser's built-in sync: sign in to the browser with sync turned on and it reaches your other devices. No account with us, no server.",
         )}
         <Toggle
           bind:checked={() => sync.enabled, (on) => void setSyncEnabled(on)}

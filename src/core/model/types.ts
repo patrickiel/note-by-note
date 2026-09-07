@@ -138,9 +138,7 @@ export interface HistoryEntry {
 /** A song the user starred (History → Favorites). Persists independently of
  * the LRU-capped Recent list. Stored array order = manual sort order. */
 export interface FavoriteEntry extends HistoryEntry {
-  /** When the star was put there — the favorite's own revision date, kept
-   * apart from `updatedAt` so ordinary practice cannot outdate an unfavorite
-   * made on another device. */
+  /** When the song was starred, for display and sorting. */
   favoritedAt: number;
   /** Last time the track was opened or played, for "Last Accessed" sorting. */
   lastAccessedAt: number;

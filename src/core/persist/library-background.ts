@@ -1,10 +1,10 @@
 import { onMessage } from '../messaging/rpc';
-import { applyCommand, canonical, emptyLibrary, mergeShared, pruned, type Library } from './library';
+import { applyCommand, emptyLibrary, newestSnapshot, type Library } from './library';
 import { libraryItem } from './library-client';
 import { parseBackupJson as parseLegacy } from './legacy-backup';
 import { parseLibrary } from './backup-codec';
 import { migrateBackup } from './library-migration';
-import { bytesUsed, changedRecords, PREFIX, readRecords, skippedMessage } from '../../features/sync/persist/records';
+import { bytesUsed, encodeSnapshot, IncompleteSnapshot, PREFIX, readSnapshot, SNAPSHOT_KEY } from '../../features/sync/persist/records';
 import { loadSyncConfig, syncConfigItem } from '../../features/sync/persist/sync-config';
 
 const WAKE = 'library-sync';
@@ -13,7 +13,7 @@ const SAFETY = 'library-sync-safety';
  * it and still lets a burst of edits ride out together. */
 const PUSH_INTERVAL = 30000;
 
-/** One writer for edits, imports and merges. Persisted records survive worker restarts. */
+/** One writer for edits, imports and sync. Saved snapshots survive worker restarts. */
 export function startLibraryBackground() {
   let queue: Promise<unknown> = Promise.resolve();
   const enqueue = <T>(work: () => Promise<T>): Promise<T> => {
@@ -31,12 +31,12 @@ export function startLibraryBackground() {
     const identified = (value: unknown) => (Array.isArray(value) ? value : []).filter((row) =>
       typeof (row as { identity?: { normalizedUrl?: unknown } })?.identity?.normalizedUrl === 'string');
     try {
-      return migrateBackup(parseLegacy({ format: 'note-by-note-backup', version: 1,
+      return parseLibrary(migrateBackup(parseLegacy({ format: 'note-by-note-backup', version: 1,
         settings: raw.settings, uiPrefs: raw.uiPrefs,
         history: identified(raw.history), favorites: identified(raw.favorites),
         eqPresets: Array.isArray(raw.eqPresets) ? raw.eqPresets : [],
         tracks: identified(Object.entries(raw).filter(([key]) => key.startsWith('track:')).map(([, value]) => value)),
-      }));
+      })));
     } catch (error) {
       console.error('[note-by-note] the previous library could not be migrated; its records are kept', error);
       return defaults;
@@ -45,10 +45,12 @@ export function startLibraryBackground() {
   let ready: Promise<void> | undefined;
   const init = () => ready ??= (async () => {
     // Only the migration needs every old key. Ordinary wakes read one item.
-    if ((await browser.storage.local.get('library')).library) return;
-    // Pruned on the way in: an old library can hold far more songs than sync
-    // allows, and without this the first reconcile would fail on every retry.
-    await libraryItem.setValue(pruned(migrate(await browser.storage.local.get(null))));
+    const { library } = await browser.storage.local.get('library');
+    if (library) {
+      await libraryItem.setValue(parseLibrary(library));
+    } else {
+      await libraryItem.setValue(migrate(await browser.storage.local.get(null)));
+    }
   })().catch((error) => { ready = undefined; throw error; });
   const schedule = async () => {
     const config = await loadSyncConfig();
@@ -62,24 +64,24 @@ export function startLibraryBackground() {
     try {
       const existing = await browser.storage.sync.get(null);
       config.usedBytes = bytesUsed(existing);
-      const remote = await readRecords(existing);
       const local = await libraryItem.getValue();
-      // Pruned here too: a merge can carry in more songs than the limits allow,
-      // and only `applyCommand` would otherwise ever bring it back under them.
-      const merged = pruned({ ...local, shared: mergeShared(local.shared, remote) });
-      if (canonical(merged) !== canonical(local)) await libraryItem.setValue(merged);
-      const { changes, removals, skipped, usedBytes } = await changedRecords(merged.shared, remote, existing);
-      // Recorded before the throttle returns, or a merge that succeeded would
-      // leave the previous run's error on screen until a push happens to be due.
-      config.lastSyncedAt = Date.now();
-      config.lastError = skipped.length ? skippedMessage(skipped) : null;
-      if (Object.keys(changes).length || removals.length) {
+      const remote = await readSnapshot(existing).catch((error) => {
+        // Repair an interrupted upload from our complete local copy. A newer
+        // incomplete snapshot must finish arriving before we can choose a winner.
+        if (error instanceof IncompleteSnapshot && local.shared.updatedAt >= error.updatedAt) return null;
+        throw error;
+      });
+      const shared = remote ? newestSnapshot(local.shared, remote) : local.shared;
+      if (shared !== local.shared) await libraryItem.setValue({ ...local, shared });
+      config.lastError = null;
+      if (shared !== remote || !existing[SNAPSHOT_KEY]) {
+        const { items, usedBytes } = await encodeSnapshot(shared, existing);
         if (Date.now() < config.lastPushAt + PUSH_INTERVAL) { await schedule(); return; }
-        if (removals.length) await browser.storage.sync.remove(removals);
-        if (Object.keys(changes).length) await browser.storage.sync.set(changes);
+        await browser.storage.sync.set(items);
         config.lastPushAt = Date.now();
         config.usedBytes = usedBytes;
       }
+      config.lastSyncedAt = Date.now();
     } catch (error) {
       config.lastError = error instanceof Error ? error.message : String(error);
     } finally {
@@ -93,7 +95,7 @@ export function startLibraryBackground() {
     const current = await libraryItem.getValue();
     const next = applyCommand(current, data);
     await libraryItem.setValue(next);
-    if (canonical(current.shared) !== canonical(next.shared)) await schedule();
+    if (current.shared.updatedAt !== next.shared.updatedAt) await schedule();
   }));
   onMessage('librarySync', ({ data }) => enqueue(async () => {
     const config = await loadSyncConfig();
@@ -125,7 +127,7 @@ export function startLibraryBackground() {
   // Recreate the safety alarm on each worker start. No panel has to stay open.
   // Only a net: `libraryEdit` schedules WAKE and `storage.onChanged` catches
   // remote writes, so this never needs to be the thing that notices a change —
-  // and each run wakes the worker to decompress every record.
+  // and each run wakes the worker to read the shared snapshot.
   void browser.alarms.create(SAFETY, { periodInMinutes: 30 });
   void enqueue(reconcile);
 }

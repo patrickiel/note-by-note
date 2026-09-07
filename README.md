@@ -117,7 +117,7 @@ the engine.
 ## Tests
 
 `pnpm test:dsp` runs the unit tests under `node --test`: the center-cut
-math, the CQT, chord decoding, library migration, merge rules, backups and independent sync records. Fast, no browser.
+math, the CQT, chord decoding, library migration, snapshot selection, backups and sync transport. Fast, no browser.
 
 The e2e harness is the interesting one. It launches Chrome for Testing with the
 extension installed, plays a 440 Hz tone, and asserts on the *processed output* —
@@ -175,26 +175,30 @@ chord analysis stay on the device. Audio is never transferred.
 One saved song owns its parameters, markers and snippets. Recent and Favorites
 are views of that song, so there are no saved-settings copies to keep aligned.
 The background is the only library writer; it handles edits, imports and remote
-updates even when the panel is closed. An active practice session keeps its loaded
+updates even when the panel is closed. Each panel loads and watches one library;
+settings, UI preferences, presets and song lists read that same copy.
+An active practice session keeps its loaded
 configuration until the song is reopened. Sync never reloads the panel.
 
-Each song is a complete, independently compressed sync item. Practice edits and
-favorite membership have separate revisions; preset deletion is an explicit null.
-Revisions advance past everything a device has observed, with deterministic ties.
-There is no whole-library blob and no chunk assembly. Because the browser caps
-sync at 512 items, a song is kept while it is favorited, in Recent, or among the
-300 most recently opened; past that it becomes a dated deletion so the removal
-crosses devices, and only the newest 100 deletions are kept. If a record or
-library exceeds the browser's capacity, local data remains saved and Settings
-reports the error. Export a backup to transfer all data, including local history
-and analysis.
+Local storage and sync use the same shared library snapshot, with one timestamp.
+The most recently edited snapshot replaces the older copy in full. On equal
+timestamps the synced copy wins. Edits made on two devices at once can overwrite
+each other, even when they affect different songs; there are no field merges or
+deletion markers.
 
-Backups are readable version-4 JSON containing shared and local sections. Imports
-also accept the version-1 format every released build wrote, and convert it once.
-Replacing a backup replaces this device's library and dates the named changes for
-sync; it does not delete songs known only to another device. Old local storage is
-retained as a recovery copy after the first migration. Upgrade all devices before
-using the new sync format; older builds cannot read it.
+The snapshot is gzip-compressed and split across fixed storage slots to fit the
+browser's 8 KB item limit. A content hash ensures all parts belong to the same
+complete snapshot before it is used. If the library exceeds sync capacity,
+Settings reports an error and retains the complete local library and the last
+successful synced copy. Songs are not automatically discarded to make it fit.
+Export a backup to transfer all data, including local history and analysis.
+
+Backups are readable version-2 JSON containing shared and local sections. Imports
+also accept the released version-1 format, converting it once.
+Importing a backup replaces the entire library and dates it
+as a new edit for sync, including removal of songs absent from the file. Old local
+storage is retained as a recovery copy after the first migration. Upgrade all
+devices before using the new sync format; older builds cannot read it.
 
 ## License
 

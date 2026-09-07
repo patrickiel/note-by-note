@@ -67,7 +67,7 @@ class TrackSync {
     try {
       const saved = await readLibrary();
       if (generation !== this.#generation) return;
-      const practice = saved.shared.songs[identity.key]?.practice.value;
+      const practice = saved.shared.songs[identity.key]?.practice;
       this.#hasSavedParams = !!practice?.params;
       markers.load(practice?.markers ?? []);
       snippets.load(practice?.snippets ?? [], practice?.sequenceLoop ?? false, practice?.sequenceCountIn ?? false);

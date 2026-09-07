@@ -19,7 +19,7 @@ Uninstalling the extension removes all of it. Settings → Reset Settings clears
 
 The extension makes no network requests of its own. The one thing that leaves your device is the optional cross-device sync copy, and it leaves through Firefox Sync — the same channel that carries your bookmarks — to the other devices signed into the same Firefox account. If Firefox Sync is off, nothing leaves the device.
 
-Sync is on by default. It writes independent compressed records containing settings, EQ presets, saved songs (including URLs, titles, durations and thumbnail URLs), favorites and manual order, practice parameters, markers, labels and snippets. Recent activity, UI layout, last-used parameters and generated chord analysis stay on the device and are included in manual backup exports.
+Sync is on by default. It writes a compressed library snapshot containing settings, EQ presets, saved songs (including URLs, titles, durations and thumbnail URLs), favorites and manual order, practice parameters, markers, labels and snippets. Recent activity, UI layout, last-used parameters and generated chord analysis stay on the device and are included in manual backup exports.
 
 Because that data contains the addresses of pages you have visited, this listing declares the `browsingActivity` data-collection category.
 
@@ -29,7 +29,7 @@ Not included: audio, page content, keystrokes, browsing history beyond the track
 
 Into Firefox Sync's storage under your Firefox account, end-to-end encrypted, subject to Mozilla's own data handling. The author operates no server and can see none of it. There are no accounts with us and no sync ID.
 
-Firefox caps synced storage at 100 KB per extension and 8 KB per item. If a compressed record or the library exceeds those limits, Settings reports an error. All data remains saved locally; no songs are automatically trimmed.
+Firefox caps synced storage at 100 KB per extension and 8 KB per item. The snapshot is split into size-limited pieces. If it exceeds the total capacity, Settings reports an error. All data remains saved locally; no songs are automatically trimmed. The newest complete library replaces older copies, so edits made on two devices at once can overwrite each other.
 
 **Turning it off and deleting the data**
 

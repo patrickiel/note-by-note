@@ -38,7 +38,7 @@ through your browser's own sync (Chrome sync, Firefox Sync) — the same channel
 that carries your bookmarks — to the other devices signed into the same
 browser profile. If browser sync is off, nothing leaves the device.
 
-Sync is **on by default**. It writes independent compressed records into the
+Sync is **on by default**. It writes a compressed library snapshot into the
 browser's synced extension storage containing:
 
 - settings and EQ presets
@@ -63,8 +63,10 @@ Sync — the latter end-to-end encrypted). The author operates no server and can
 see none of it. There are no accounts with us and no sync ID.
 
 The browser caps synced storage at 100 KB per extension and 8 KB per item.
-If a compressed record or the library exceeds those limits, Settings reports an
-error. All data remains saved locally; no songs are automatically trimmed.
+The snapshot is split into size-limited pieces. If it exceeds the total capacity,
+Settings reports an error. All data remains saved locally; no songs are
+automatically trimmed. The newest complete library replaces older copies, so
+edits made on two devices at once can overwrite each other.
 
 ### Turning it off and deleting the data
 

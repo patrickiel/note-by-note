@@ -1,140 +1,45 @@
-import { DEFAULT_KEYMAP, DEFAULT_SETTINGS, DEFAULT_UI_PREFS } from '../../../core/model/defaults';
 import type { PanelId, SectionId, Settings, UiPrefs } from '../../../core/model/types';
+import type { UiPrefsPatch } from '../../../core/persist/library';
 import { editLibrary } from '../../../core/persist/library-client';
-import { settingsItem, uiPrefsItem } from '../../../core/persist/storage';
+import { library } from '../../../core/state/library.svelte';
 
-/** Mirror of the library's settings. Components mutate via `update`, which
- * sends the patch to the background writer. */
+/** Views of the single library copy. All changes go through the background. */
 class SettingsStore {
-  current = $state<Settings>(structuredClone(DEFAULT_SETTINGS));
-  loaded = $state(false);
-  #writing = false;
+  current = $derived<Settings>({
+    ...library.current.shared.settings, lastUsedParams: library.current.local.lastUsedParams,
+  });
 
-  /** Wired by the connection layer, which pushes the engine-relevant settings
-   * to the tab. Fires on every path that lands a new value in
-   * `current` — the engine can't observe this store itself. */
-  onChange: ((next: Settings) => void) | null = null;
-
-  /** Stored settings may predate newly added fields — backfill from defaults so
-   * a missing key never reaches the engine as `undefined` (which the port drops,
-   * e.g. a NaN count-in duration that never elapses). */
-  #withDefaults(value: Settings | null): Settings {
-    return {
-      ...structuredClone(DEFAULT_SETTINGS),
-      ...value,
-      // Merged one level deeper: a keymap stored before an action existed would
-      // otherwise leave that action `undefined`, which the dispatcher can never
-      // match (the hotkey silently does nothing) and the Help sheet — which
-      // reads the keymap unconditionally — renders as a blank row.
-      keymap: { ...DEFAULT_KEYMAP, ...value?.keymap },
-    };
+  update(patch: Partial<Settings>) {
+    return editLibrary({ type: 'settings', patch: $state.snapshot(patch) });
   }
 
-  async init() {
-    this.current = this.#withDefaults(await settingsItem.getValue());
-    this.loaded = true;
-    settingsItem.watch((value) => {
-      if (this.#writing) return;
-      const before = this.current.theme;
-      this.current = this.#withDefaults(value);
-      // Settings can land here without any local control having been touched —
-      // a backup import, or a merge from another device — and `applyTheme` is
-      // what actually paints <html data-theme>.
-      if (this.current.theme !== before) applyTheme(this.current.theme);
-      this.onChange?.(this.current);
-    });
-  }
-
-  async update(patch: Partial<Settings>) {
-    // Settings cross devices as one revisioned item (see `core/persist/library.ts`),
-    // so the write carries no date of its own.
-    const next = { ...this.current, ...patch };
-    // Auto Reset and Remember settings are alternatives — enabling one
-    // switches the other off.
-    if (patch.rememberSettings) next.autoReset = false;
-    if (patch.autoReset) next.rememberSettings = false;
-    this.current = next;
-    this.onChange?.(next);
-    this.#writing = true;
-    try {
-      // $state.snapshot, like UiPrefsStore below: `next` is spread off the
-      // `current` rune, so nested `keymap`/`lastUsedParams` are still proxies.
-      // Firefox structured-clones storage writes and throws DataCloneError on a
-      // proxy — settings would apply for the session but never persist.
-      await editLibrary({ type: 'settings', patch: $state.snapshot(patch) as Partial<Settings> });
-    } finally {
-      this.#writing = false;
-    }
-  }
-
-  async reset() {
-    this.current = structuredClone(DEFAULT_SETTINGS);
-    this.onChange?.(this.current);
-    await editLibrary({ type: 'settings', patch: {}, reset: true });
+  reset() {
+    return editLibrary({ type: 'settings', patch: {}, reset: true });
   }
 }
 
 class UiPrefsStore {
-  current = $state<UiPrefs>(structuredClone(DEFAULT_UI_PREFS));
-  #writing = false;
+  current = $derived(library.current.local.uiPrefs);
 
-  /** Stored values may predate newly added prefs — backfill from defaults. */
-  #withDefaults(value: UiPrefs | null): UiPrefs {
-    return { ...structuredClone(DEFAULT_UI_PREFS), ...value };
-  }
-
-  async init() {
-    this.current = this.#withDefaults(await uiPrefsItem.getValue());
-    uiPrefsItem.watch((value) => {
-      if (this.#writing) return;
-      this.current = this.#withDefaults(value);
-    });
-  }
-
-  async #save() {
-    this.#writing = true;
-    try {
-      await uiPrefsItem.setValue($state.snapshot(this.current));
-    } finally {
-      this.#writing = false;
-    }
+  update(patch: UiPrefsPatch) {
+    return editLibrary({ type: 'uiPrefs', patch });
   }
 
   toggleCollapsed(panel: PanelId) {
-    this.current.collapsed[panel] = !this.current.collapsed[panel];
-    void this.#save();
+    return this.update({ collapsed: { [panel]: !this.current.collapsed[panel] } });
   }
 
   toggleSectionCollapsed(section: SectionId) {
-    this.current.collapsedSections[section] = !this.current.collapsedSections[section];
-    void this.#save();
+    return this.update({ collapsedSections: { [section]: !this.current.collapsedSections[section] } });
   }
 
-  setMarkerView(view: UiPrefs['markerView']) {
-    this.current.markerView = view;
-    void this.#save();
-  }
+  setMarkerView(markerView: UiPrefs['markerView']) { return this.update({ markerView }); }
+  setTimelineFollow(timelineFollow: boolean) { return this.update({ timelineFollow }); }
+  setFavoritesSort(favoritesSort: UiPrefs['favoritesSort']) { return this.update({ favoritesSort }); }
+  setLibraryTab(libraryTab: UiPrefs['libraryTab']) { return this.update({ libraryTab }); }
 
-  setTimelineFollow(on: boolean) {
-    this.current.timelineFollow = on;
-    void this.#save();
-  }
-
-  setFavoritesSort(sort: UiPrefs['favoritesSort']) {
-    this.current.favoritesSort = sort;
-    void this.#save();
-  }
-
-  setLibraryTab(tab: UiPrefs['libraryTab']) {
-    this.current.libraryTab = tab;
-    void this.#save();
-  }
-
-  /** Override a virtual boundary marker's label; empty text restores the
-   * default ("Start"/"End"). */
   setBoundaryLabel(which: 'start' | 'end', label: string) {
-    this.current.boundaryLabels[which] = label.trim();
-    void this.#save();
+    void this.update({ boundaryLabels: { [which]: label.trim() } });
   }
 }
 
