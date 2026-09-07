@@ -1,103 +1,19 @@
-import { storage, type StorageItemKey, type WxtStorageItem } from '#imports';
-import { DEFAULT_SETTINGS, DEFAULT_UI_PREFS } from '../model/defaults';
-import type {
-  EqPreset,
-  FavoriteEntry,
-  HistoryEntry,
-  Settings,
-  TrackData,
-  UiPrefs,
-} from '../model/types';
+import { storage } from '#imports';
+import type { Settings, UiPrefs } from '../model/types';
+import { editLibrary, readLibrary, watchLibrary } from './library-client';
 
-/** Rebuild a value as plain arrays/objects, stripping any Svelte `$state`
- * proxies on the way.
- *
- * Chrome serializes storage writes to JSON and reads straight through a proxy;
- * Firefox structured-clones them and throws DataCloneError, rejecting the write
- * with nothing persisted. Panel stores are expected to `$state.snapshot` before
- * writing, but one missed call is an invisible, browser-specific data-loss bug —
- * so every write goes through here as well.
- *
- * A rebuild, not `structuredClone`: that throws on a proxy, which is the very
- * case being defended against. Safe because this schema is JSON-shaped
- * throughout (numbers, strings, booleans, arrays, plain objects); a Date, Map or
- * typed array added later would need handling here first.
- *
- * Plain function, not the `$state.snapshot` rune: background.ts imports this
- * module and runes only compile inside Svelte files. */
-function toPlain<T>(value: T): T {
-  if (Array.isArray(value)) return value.map(toPlain) as T;
-  if (value === null || typeof value !== 'object') return value;
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(value)) out[k] = toPlain(v);
-  return out as T;
-}
-
-/** `storage.defineItem` with proxy-stripping on every write. Annotated rather
- * than inferred: `storage.defineItem` is overloaded five ways, so deriving this
- * signature from it makes the inference circular. */
-function defineItem<T>(
-  key: StorageItemKey,
-  options: { fallback: T },
-): WxtStorageItem<T, Record<string, unknown>> {
-  const item = storage.defineItem<T>(key, options);
-  const setValue = item.setValue.bind(item);
-  item.setValue = (value: T) => setValue(toPlain(value));
-  return item;
-}
-
-export const settingsItem = defineItem<Settings>('local:settings', {
-  fallback: DEFAULT_SETTINGS,
+/** Feature stores read projections and send changes to the single background writer. */
+const settingsOf = (library: Awaited<ReturnType<typeof readLibrary>>): Settings => ({
+  ...library.shared.settings.value, lastUsedParams: library.local.lastUsedParams,
 });
-
-export const uiPrefsItem = defineItem<UiPrefs>('local:uiPrefs', {
-  fallback: DEFAULT_UI_PREFS,
-});
-
-/** Recent history (Auto Save), newest first. */
-export const historyItem = defineItem<HistoryEntry[]>('local:history', {
-  fallback: [],
-});
-
-/** Starred songs (History → Favorites). Array order = manual sort order. */
-export const favoritesItem = defineItem<FavoriteEntry[]>('local:favorites', {
-  fallback: [],
-});
-
-/** EQ curves the user saved (Equalizer → preset row). Array order = save order.
- * Kept out of `settings` so Reset Settings can't wipe them. */
-export const eqPresetsItem = defineItem<EqPreset[]>('local:eqPresets', {
-  fallback: [],
-});
-
-/** Origins the user has granted host permission for (mirrors permissions API,
- * used to show/revoke the list without a permissions query round-trip). */
-export const grantedOriginsItem = defineItem<string[]>('local:grantedOrigins', {
-  fallback: [],
-});
-
-/** Per-track markers/snippets, keyed by TrackIdentity.key. */
-export function trackDataKey(key: string) {
-  return `local:track:${key}` as const;
-}
-
-export async function loadTrackData(key: string): Promise<TrackData | null> {
-  return (await storage.getItem<TrackData>(trackDataKey(key))) ?? null;
-}
-
-export async function saveTrackData(data: TrackData): Promise<void> {
-  await storage.setItem(trackDataKey(data.identity.key), toPlain(data));
-}
-
-/** Drops every stored track record whose identity key isn't in `keep` — a
- * restore replaces the set of records rather than merging into it. Written
- * as "remove what's left over" (rather than wiping first) so the records are
- * only ever gone once their replacements are in: a restore interrupted
- * halfway leaves stale records behind, never an empty library. */
-export async function removeTrackDataExcept(keep: Set<string>): Promise<void> {
-  const snapshot = await browser.storage.local.get(null);
-  const stale = Object.keys(snapshot).filter(
-    (k) => k.startsWith('track:') && !keep.has(k.slice('track:'.length)),
-  );
-  if (stale.length) await browser.storage.local.remove(stale);
-}
+export const settingsItem = {
+  getValue: async () => settingsOf(await readLibrary()),
+  setValue: (value: Settings) => editLibrary({ type: 'settings', patch: value }),
+  watch: (listener: (value: Settings) => void) => watchLibrary(settingsOf, listener),
+};
+export const uiPrefsItem = {
+  getValue: async () => (await readLibrary()).local.uiPrefs,
+  setValue: (value: UiPrefs) => editLibrary({ type: 'uiPrefs', value }),
+  watch: (listener: (value: UiPrefs) => void) => watchLibrary((library) => library.local.uiPrefs, listener),
+};
+export const grantedOriginsItem = storage.defineItem<string[]>('local:grantedOrigins', { fallback: [] });

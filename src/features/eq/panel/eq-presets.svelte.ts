@@ -1,8 +1,7 @@
 import { BUILTIN_EQ_PRESETS, EQ_BANDS } from '../../../core/model/defaults';
 import type { EqPreset } from '../../../core/model/types';
-import { deleteEqPreset, saveEqPreset } from '../persist/eq-presets';
-import { isLive } from '../../../core/persist/deletions';
-import { eqPresetsItem } from '../../../core/persist/storage';
+import { editLibrary, readLibrary, watchLibrary } from '../../../core/persist/library-client';
+import type { Library } from '../../../core/persist/library';
 
 /** Slider gains are multiples of 0.5 dB, so anything closer than this is the
  * same curve; the tolerance only guards against float drift. */
@@ -14,10 +13,11 @@ class EqPresetsStore {
   saved = $state<EqPreset[]>([]);
 
   async init() {
-    this.saved = (await eqPresetsItem.getValue()).filter(isLive);
-    eqPresetsItem.watch((value) => {
-      this.saved = (value ?? []).filter(isLive);
-    });
+    const select = (library: Library): EqPreset[] => Object.entries(library.shared.presets)
+      .filter(([, preset]) => preset.value !== null)
+      .map(([name, preset]) => ({ name, gains: preset.value!, updatedAt: preset.at }));
+    this.saved = select(await readLibrary());
+    watchLibrary(select, (value) => { this.saved = value; });
   }
 
   /** Built-ins first, then the user's, as listed in the dropdown. */
@@ -42,11 +42,11 @@ class EqPresetsStore {
   }
 
   async save(name: string, gains: number[]) {
-    await saveEqPreset(name, gains);
+    await editLibrary({ type: 'preset', name, gains });
   }
 
   async remove(name: string) {
-    await deleteEqPreset(name);
+    await editLibrary({ type: 'preset', name, gains: null });
   }
 }
 

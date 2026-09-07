@@ -1,847 +1,108 @@
-import {
-  DEFAULT_PARAMS,
-  DEFAULT_SETTINGS,
-  DEFAULT_UI_PREFS,
-} from '../model/defaults.ts';
-import { youtubeThumbnailUrl } from '../model/thumbnail.ts';
+import { DEFAULT_PARAMS, DEFAULT_SETTINGS, DEFAULT_UI_PREFS } from '../model/defaults.ts';
 import { songKey } from '../model/track-identity.ts';
-import { rekeyByIdentity } from './rekey.ts';
-import type {
-  ChordChart,
-  ChordSegment,
-  EffectParams,
-  EqPreset,
-  FavoriteEntry,
-  HistoryEntry,
-  Marker,
-  Settings,
-  Snippet,
-  SnippetOverrides,
-  TrackData,
-  TrackIdentity,
-  UiPrefs,
-} from '../model/types';
+import { emptyLibrary, type Library, type SharedLibrary } from './library.ts';
+import { parseBackupJson as parseLegacy } from './legacy-backup.ts';
+import { migrateBackup } from './library-migration.ts';
 
-/**
- * The backup file format — the verbose in-memory `Backup` (v1) and its
- * compact serialization (v2), which is what the export writes and what will
- * ride the browser's sync storage. Nothing in `storage.local` changes: the
- * codec shrinks the wire shape only, and `decodeBackup` hands back today's
- * types.
- *
- * Pure and DOM-free so it runs under `node --test`; hence relative `.ts`
- * imports and no `#imports` (see CLAUDE.md).
- *
- * Where the bytes go, and what v2 does about it: identities were repeated in
- * Recent, Favorites and the track record (one `songs` table, referenced by
- * index); every Recent row carried the full 13-field params object (a delta
- * against the defaults, usually empty); chord charts spelled out four keys and
- * 17-digit floats per segment (parallel arrays on a centisecond grid, labels
- * through a per-chart table); settings/UI prefs carried every default (deep
- * diff). Things derivable from what is kept are dropped: the identity key,
- * YouTube thumbnails, the plain watch-page URL, marker/snippet ids.
- *
- * Every rounding is idempotent — `encode(decode(encode(x)))` deep-equals
- * `encode(x)` — which is what will let two devices compare content hashes of
- * data that both went through this.
- */
-
-/** Marks a file as ours, so a stray JSON can be rejected on sight. */
 export const BACKUP_FORMAT = 'note-by-note-backup';
+export const BACKUP_VERSION = 4;
+export interface Backup extends Library { format: typeof BACKUP_FORMAT; version: 4; exportedAt: number }
 
-/** The verbose shape: what `createBackup` builds, and the only format any
- * released build ever wrote — so it is the one an existing user's exported
- * file is in, and import still accepts it. */
-export const BACKUP_VERSION = 1;
-
-/** The compact shape below, and what the export writes. `parseBackupJson`
- * takes this or the verbose v1, and nothing else: version 2 never shipped —
- * it existed only on the branch this format grew on — so no file and no synced
- * blob is in it, and carrying a compatibility path for it would be carrying
- * one for nobody. */
-export const COMPACT_VERSION = 3;
-
-/** Everything a user owns, in one file. Host permissions are deliberately out:
- * they live in the browser's permission store, and only a prompt can grant
- * them — a backup that listed origins would restore access it can't give. */
-export interface Backup {
-  format: typeof BACKUP_FORMAT;
-  version: number;
-  exportedAt: number;
-  appVersion: string;
-  settings: Settings;
-  uiPrefs: UiPrefs;
-  history: HistoryEntry[];
-  favorites: FavoriteEntry[];
-  eqPresets: EqPreset[];
-  /** Per-track markers and snippets, one entry per saved track. */
-  tracks: TrackData[];
+function object(value: unknown): Record<string, any> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Damaged library data.');
+  return value as Record<string, any>;
 }
-
-// ---------------------------------------------------------------------------
-// Compact shape
-
-/** Effect params as a delta against `DEFAULT_PARAMS`; absent = default. */
-export interface CompactParams {
-  /** transpose (semitones) */
-  t?: number;
-  /** transposeEnabled off */
-  te?: 0;
-  /** pitchCents */
-  c?: number;
-  /** pitchEnabled off */
-  ce?: 0;
-  /** speed */
-  s?: number;
-  /** speedEnabled off */
-  se?: 0;
-  /** vocalReduce */
-  v?: number;
-  /** vocalReduceEnabled off */
-  ve?: 0;
-  /** vocalMode 'isolate' */
-  vm?: 1;
-  /** eq: [enabled, ...gains] — present when enabled or any gain is non-zero */
-  e?: number[];
-  /** tuning: [trackHz, instrumentHz] — present when not 440/440 */
-  tu?: [number, number];
-  /** power off */
-  pw?: 0;
-  /** baseBpm */
-  b?: number;
+function number(value: unknown) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error('Damaged library number.');
 }
-
-/** `[normalizedUrl, title, durationSec]`. YouTube watch URLs are shortened to
- * `yt:<id>`. The key is never stored: it is `songKey` of the first two, which
- * is why a device on either side of a key change reads the other's blob —
- * each derives the key it uses from the same two strings. */
-export type CompactSong = [string, string, number];
-
-export interface CompactEntry {
-  /** Index into `songs`. */
-  i: number;
-  /** updatedAt, ms. */
-  at: number;
-  p?: CompactParams;
-  /** pageUrl, when not the song's plain page. */
-  url?: string;
-  /** thumbnailUrl, when not derivable from the page URL. */
-  th?: string;
-  /** A tombstone (`deletions.ts`): the row was removed at `at`. Nothing else
-   * is carried — a deletion is a song and a date. */
-  x?: 1;
+function string(value: unknown) {
+  if (typeof value !== 'string') throw new Error('Damaged library text.');
 }
-
-export interface CompactFavorite extends CompactEntry {
-  /** favoritedAt, ms. */
-  fa: number;
-  /** lastAccessedAt, ms. */
-  la: number;
-  /** orderedAt, ms; omitted when the row predates manual order syncing. */
-  oa?: number;
-}
-
-/** `[name, gains, updatedAt?]`, or `[name, [], updatedAt, 1]` for a tombstone
- * (`deletions.ts`). */
-export type CompactEqPreset =
-  | [string, number[]]
-  | [string, number[], number]
-  | [string, number[], number, 1];
-
-/** `[t_ms, label?]` — label omitted when empty. */
-export type CompactMarker = [number] | [number, string];
-
-/** `[name, start_ms, end_ms, repeats?, enabled?, overrides?]`, trailing
- * defaults omitted (`1`, `1`, `{}`). `repeats` 0 stands for Infinity. */
-export type CompactSnippet = [string, number, number, number?, number?, CompactOverrides?];
-
-export interface CompactOverrides {
-  s?: number;
-  t?: number;
-  v?: number;
-}
-
-/** Segments as parallel arrays on a centisecond grid. */
-export interface CompactChart {
-  /** First segment start. */
-  t0: number;
-  /** Durations. */
-  d: number[];
-  /** Gap before each segment (index 0 is always 0); omitted when all zero. */
-  g?: number[];
-  /** Label table, first-appearance order. */
-  l: string[];
-  /** Label index per segment. */
-  i: number[];
-  /** Key signature: [tonic, minor, confidence]; omitted when none. */
-  k?: [string, 0 | 1, number];
-  cov: number;
-  a0: number;
-  a1: number;
-  /** computedAt, ms. */
-  c: number;
-}
-
-export interface CompactTrack {
-  i: number;
-  /** updatedAt, ms. */
-  at: number;
-  m?: CompactMarker[];
-  s?: CompactSnippet[];
-  /** sequenceLoop */
-  L?: 1;
-  /** sequenceCountIn */
-  C?: 1;
-  /** chordsEnabled, only when the record has the switch at all. */
-  ce?: 0 | 1;
-  ch?: CompactChart;
-}
-
-export interface CompactBackup {
-  format: typeof BACKUP_FORMAT;
-  version: typeof COMPACT_VERSION;
-  /** exportedAt, ms. */
-  at: number;
-  /** Settings that differ from the defaults (`lastUsedParams` as `lp`). */
-  s: Record<string, unknown>;
-  /** UI prefs that differ from the defaults. */
-  u: Record<string, unknown>;
-  /** settings.updatedAt, ms; omitted when never dated. */
-  sat?: number;
-  /** uiPrefs.updatedAt, ms; omitted when never dated. */
-  uat?: number;
-  /** `[name, gains, updatedAt?]` per saved EQ preset. */
-  eq: CompactEqPreset[];
-  songs: CompactSong[];
-  h: CompactEntry[];
-  f: CompactFavorite[];
-  t: CompactTrack[];
-}
-
-// ---------------------------------------------------------------------------
-// Shared helpers
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function damaged(section: string): Error {
-  return new Error(`This backup's "${section}" list is damaged.`);
-}
-
-const roundTo = (dp: number) => {
-  const f = 10 ** dp;
-  return (x: number) => Math.round(x * f) / f;
-};
-const round2 = roundTo(2);
-const round3 = roundTo(3);
-const millis = (seconds: number) => Math.round(seconds * 1000);
-const centis = (seconds: number) => Math.round(seconds * 100);
-/** Timestamps stay in milliseconds: they decide merges (a deletion against a
- * re-add, the newer of two edits), and rounding would let two actions within
- * the same second read as one. */
-const stamp = (ms: number) => (Number.isFinite(ms) ? Math.round(ms) : 0);
-
-function num(value: unknown, section: string): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) throw damaged(section);
+function array(value: unknown): any[] {
+  if (!Array.isArray(value)) throw new Error('Damaged library list.');
   return value;
 }
-
-function str(value: unknown, section: string): string {
-  if (typeof value !== 'string') throw damaged(section);
-  return value;
+function versioned(value: unknown) {
+  const item = object(value);
+  number(item.at);
+  if (item.at < 0 || !('value' in item)) throw new Error('Damaged library revision.');
+  return item;
 }
-
-function arr(value: unknown, section: string): unknown[] {
-  if (!Array.isArray(value)) throw damaged(section);
-  return value;
-}
-
-function rec(value: unknown, section: string): Record<string, unknown> {
-  if (!isRecord(value)) throw damaged(section);
-  return value;
-}
-
-/** Rows are identified by their URL and title (`songKey`); without those they
- * can't be stored or matched back to a track, so a file carrying them is not
- * usable. The key a file may also carry is not read — it is derived. */
-function identifiedArr<T>(value: unknown, section: string): T[] {
-  const list = arr(value, section);
-  const identified = list.every(
-    (e) => isRecord(e) && isRecord(e.identity) && typeof e.identity.normalizedUrl === 'string',
-  );
-  if (!identified) throw damaged(section);
-  return list as T[];
-}
-
-/** Keys of `value` whose (JSON) value differs from `defaults`, recursing into
- * plain objects. Keys unknown to `defaults` are kept verbatim. */
-function diffPlain(
-  value: Record<string, unknown>,
-  defaults: Record<string, unknown>,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [key, v] of Object.entries(value)) {
-    if (v === undefined) continue;
-    const d = defaults[key];
-    if (isRecord(v) && isRecord(d)) {
-      const nested = diffPlain(v, d);
-      if (Object.keys(nested).length) out[key] = nested;
-    } else if (!(key in defaults) || JSON.stringify(v) !== JSON.stringify(d)) {
-      out[key] = v;
-    }
+/** Validate/backfill a JSON object against its version's defaults. */
+function defaults<T>(value: unknown, fallback: T): T {
+  const source = object(value);
+  const result = structuredClone(fallback) as Record<string, any>;
+  for (const [key, expected] of Object.entries(result)) {
+    if (!(key in source)) continue;
+    const next = source[key];
+    if (expected === null) { if (next !== null) number(next); }
+    else if (Array.isArray(expected)) array(next).forEach(number);
+    else if (typeof expected === 'object') { result[key] = defaults(next, expected); continue; }
+    else if (typeof next !== typeof expected) throw new Error('Damaged library setting.');
+    if (typeof next === 'number') number(next);
+    result[key] = next;
   }
-  return out;
+  return result as T;
 }
-
-/** The inverse of `diffPlain`: a deep clone of `defaults` with `diff` laid
- * over it. */
-function mergePlain(
-  defaults: Record<string, unknown>,
-  diff: Record<string, unknown>,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = JSON.parse(JSON.stringify(defaults));
-  for (const [key, v] of Object.entries(diff)) {
-    if (v === undefined) continue;
-    const d = out[key];
-    out[key] = isRecord(v) && isRecord(d) ? mergePlain(d, v) : v;
+export function parseShared(value: unknown): SharedLibrary {
+  const shared = structuredClone(object(value));
+  shared.settings = versioned(shared.settings);
+  shared.settings.value = defaults(shared.settings.value, DEFAULT_SETTINGS);
+  shared.favoriteOrder = versioned(shared.favoriteOrder);
+  array(shared.favoriteOrder.value).forEach(string);
+  for (const [key, raw] of Object.entries(object(shared.songs))) {
+    const song = object(raw);
+    song.practice = versioned(song.practice);
+    song.favorite = versioned(song.favorite);
+    if (typeof song.favorite.value !== 'boolean') throw new Error('Damaged favorite.');
+    const practice = song.practice.value;
+    if (practice === null) continue;
+    object(practice);
+    const identity = object(practice.identity);
+    string(identity.normalizedUrl); string(identity.title); number(identity.durationSec);
+    if (key !== songKey(identity as any)) throw new Error('Song identity does not match its key.');
+    identity.key = key;
+    string(practice.pageUrl);
+    if (practice.thumbnailUrl !== undefined) string(practice.thumbnailUrl);
+    if (practice.params !== undefined) practice.params = defaults(practice.params, DEFAULT_PARAMS);
+    array(practice.markers).forEach((m) => { object(m); string(m.id); string(m.label); number(m.t); });
+    array(practice.snippets).forEach((s) => {
+      object(s); string(s.id); string(s.name); number(s.startT); number(s.endT);
+      if (s.repeats !== null && s.repeats !== Infinity) number(s.repeats);
+      if (typeof s.enabled !== 'boolean') throw new Error('Damaged snippet.');
+      for (const amount of Object.values(object(s.overrides))) number(amount);
+    });
+    if (typeof practice.sequenceLoop !== 'boolean' || typeof practice.sequenceCountIn !== 'boolean') throw new Error('Damaged sequence.');
+    if (practice.chordsEnabled !== undefined && typeof practice.chordsEnabled !== 'boolean') throw new Error('Damaged chord setting.');
   }
-  return out;
-}
-
-// ---------------------------------------------------------------------------
-// Effect params
-
-/** Old rows may predate a field (the switches, tuning, vocalMode, baseBpm);
- * a missing one reads as its default, which is how the UI treats it too. */
-export function encodeParams(p: EffectParams): CompactParams | undefined {
-  const out: CompactParams = {};
-  const transpose = round3(p.transpose ?? 0);
-  if (transpose !== 0) out.t = transpose;
-  if (p.transposeEnabled === false) out.te = 0;
-  const cents = round3(p.pitchCents ?? 0);
-  if (cents !== 0) out.c = cents;
-  if (p.pitchEnabled === false) out.ce = 0;
-  const speed = round3(p.speed ?? 1);
-  if (speed !== 1) out.s = speed;
-  if (p.speedEnabled === false) out.se = 0;
-  const vocal = round3(p.vocalReduce ?? 0);
-  if (vocal !== 0) out.v = vocal;
-  if (p.vocalReduceEnabled === false) out.ve = 0;
-  if (p.vocalMode === 'isolate') out.vm = 1;
-  const eq = p.eq ?? DEFAULT_PARAMS.eq;
-  const gains = (eq.gains ?? DEFAULT_PARAMS.eq.gains).map(round2);
-  if (eq.enabled || gains.some((g) => g !== 0)) out.e = [eq.enabled ? 1 : 0, ...gains];
-  const tuning = p.tuning ?? DEFAULT_PARAMS.tuning;
-  const trackHz = round2(tuning.trackHz ?? 440);
-  const instrumentHz = round2(tuning.instrumentHz ?? 440);
-  if (trackHz !== 440 || instrumentHz !== 440) out.tu = [trackHz, instrumentHz];
-  if (p.power === false) out.pw = 0;
-  if (typeof p.baseBpm === 'number' && Number.isFinite(p.baseBpm)) out.b = round2(p.baseBpm);
-  return Object.keys(out).length ? out : undefined;
-}
-
-export function decodeParams(raw: unknown, section: string): EffectParams {
-  const p = structuredClone(DEFAULT_PARAMS);
-  if (raw === undefined) return p;
-  const c = rec(raw, section);
-  if (c.t !== undefined) p.transpose = num(c.t, section);
-  if (c.te !== undefined) p.transposeEnabled = false;
-  if (c.c !== undefined) p.pitchCents = num(c.c, section);
-  if (c.ce !== undefined) p.pitchEnabled = false;
-  if (c.s !== undefined) p.speed = num(c.s, section);
-  if (c.se !== undefined) p.speedEnabled = false;
-  if (c.v !== undefined) p.vocalReduce = num(c.v, section);
-  if (c.ve !== undefined) p.vocalReduceEnabled = false;
-  if (c.vm !== undefined) p.vocalMode = 'isolate';
-  if (c.e !== undefined) {
-    const e = arr(c.e, section);
-    if (e.length !== 1 + p.eq.gains.length) throw damaged(section);
-    p.eq = { enabled: num(e[0], section) === 1, gains: e.slice(1).map((g) => num(g, section)) };
+  for (const raw of Object.values(object(shared.presets))) {
+    const preset = versioned(raw);
+    if (preset.value !== null) array(preset.value).forEach(number);
   }
-  if (c.tu !== undefined) {
-    const tu = arr(c.tu, section);
-    if (tu.length !== 2) throw damaged(section);
-    p.tuning = { trackHz: num(tu[0], section), instrumentHz: num(tu[1], section) };
+  return { settings: shared.settings, songs: shared.songs, presets: shared.presets, favoriteOrder: shared.favoriteOrder };
+}
+export function parseLibrary(value: unknown): Library {
+  const source = object(value);
+  const local = object(source.local);
+  const charts = object(local.charts);
+  for (const chart of Object.values(charts)) {
+    if (chart === null) continue;
+    object(chart); number(chart.computedAt); number(chart.coverage); number(chart.analyzedFrom); number(chart.analyzedTo);
+    array(chart.segments).forEach((s) => { object(s); number(s.startT); number(s.endT); string(s.label); number(s.confidence); });
+    if (chart.key !== null) { object(chart.key); string(chart.key.tonic); string(chart.key.mode); number(chart.key.confidence); }
   }
-  if (c.pw !== undefined) p.power = false;
-  if (c.b !== undefined) p.baseBpm = num(c.b, section);
-  return p;
-}
-
-// ---------------------------------------------------------------------------
-// Settings / UI prefs
-
-export function encodeSettings(settings: Settings): Record<string, unknown> {
-  const { lastUsedParams, ...rest } = settings;
-  // Not a setting: the date rides beside the diff (`sat`), so a device that
-  // changed a setting and changed it back still encodes as empty.
-  delete (rest as { updatedAt?: number }).updatedAt;
-  const out = diffPlain(rest, { ...DEFAULT_SETTINGS });
-  if (lastUsedParams) out.lp = encodeParams(lastUsedParams) ?? {};
-  return out;
-}
-
-export function decodeSettings(raw: unknown): Settings {
-  const diff = raw === undefined ? {} : rec(raw, 'settings');
-  const { lp, ...rest } = diff;
-  const settings = mergePlain({ ...DEFAULT_SETTINGS }, rest) as unknown as Settings;
-  if (lp !== undefined) settings.lastUsedParams = decodeParams(lp, 'settings');
-  return settings;
-}
-
-export function encodeUiPrefs(uiPrefs: UiPrefs): Record<string, unknown> {
-  const rest = { ...uiPrefs };
-  delete rest.updatedAt;
-  return diffPlain(
-    rest as unknown as Record<string, unknown>,
-    DEFAULT_UI_PREFS as unknown as Record<string, unknown>,
-  );
-}
-
-export function decodeUiPrefs(raw: unknown): UiPrefs {
-  const diff = raw === undefined ? {} : rec(raw, 'uiPrefs');
-  return mergePlain(
-    DEFAULT_UI_PREFS as unknown as Record<string, unknown>,
-    diff,
-  ) as unknown as UiPrefs;
-}
-
-// ---------------------------------------------------------------------------
-// Songs (identities)
-
-const YT_WATCH = 'https://youtube.com/watch?v=';
-const YT_ID_RE = /^[\w-]+$/;
-
-function shortUrl(normalizedUrl: string): string {
-  if (normalizedUrl.startsWith(YT_WATCH)) {
-    const id = normalizedUrl.slice(YT_WATCH.length);
-    if (YT_ID_RE.test(id)) return `yt:${id}`;
-  }
-  return normalizedUrl;
-}
-
-function longUrl(short: string): string {
-  if (short.startsWith('yt:')) {
-    const id = short.slice(3);
-    if (!YT_ID_RE.test(id)) throw damaged('songs');
-    return YT_WATCH + id;
-  }
-  return short;
-}
-
-/** The page a song is opened at when the entry carries no `url` of its own:
- * the engine records `location.href`, which on YouTube is the `www.` form of
- * the watch page — so that, not the normalized URL, is the default there. */
-function defaultPageUrl(normalizedUrl: string): string {
-  if (normalizedUrl.startsWith(YT_WATCH)) {
-    return `https://www.youtube.com/watch?v=${normalizedUrl.slice(YT_WATCH.length)}`;
-  }
-  return normalizedUrl;
-}
-
-/** One row per distinct (url, title, duration) — not per URL: the duration is
- * part of the key, and a song whose duration drifted legitimately has two. */
-class SongTable {
-  rows: CompactSong[] = [];
-  #index = new Map<string, number>();
-
-  add(identity: TrackIdentity): number {
-    const url = identity.normalizedUrl ?? '';
-    const title = identity.title ?? '';
-    const duration = Number.isFinite(identity.durationSec) ? identity.durationSec : 0;
-    const tableKey = `${url}\n${title}\n${duration}`;
-    const existing = this.#index.get(tableKey);
-    if (existing !== undefined) return existing;
-    const row: CompactSong = [shortUrl(url), title, duration];
-    this.rows.push(row);
-    this.#index.set(tableKey, this.rows.length - 1);
-    return this.rows.length - 1;
-  }
-}
-
-function decodeSongs(raw: unknown): TrackIdentity[] {
-  return arr(raw, 'songs').map((row) => {
-    const r = arr(row, 'songs');
-    if (r.length !== 3) throw damaged('songs');
-    const normalizedUrl = longUrl(str(r[0], 'songs'));
-    const title = str(r[1], 'songs');
-    const durationSec = num(r[2], 'songs');
-    return { key: songKey({ normalizedUrl, title }), normalizedUrl, title, durationSec };
-  });
-}
-
-function songAt(songs: TrackIdentity[], index: unknown, section: string): TrackIdentity {
-  if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index >= songs.length) {
-    throw damaged(section);
-  }
-  return songs[index];
-}
-
-// ---------------------------------------------------------------------------
-// Recent / Favorites
-
-function encodeEntry(entry: HistoryEntry, songs: SongTable): CompactEntry {
-  const out: CompactEntry = { i: songs.add(entry.identity), at: stamp(entry.updatedAt) };
-  // A tombstone is the song and the date it went; the rest was only ever there
-  // to be shown, and nothing shows a removed row.
-  if (entry.deleted) return { ...out, x: 1 };
-  const params = encodeParams(entry.params ?? DEFAULT_PARAMS);
-  if (params) out.p = params;
-  const pageUrl = entry.pageUrl ?? '';
-  if (pageUrl !== defaultPageUrl(entry.identity.normalizedUrl)) out.url = pageUrl;
-  if (entry.thumbnailUrl && entry.thumbnailUrl !== youtubeThumbnailUrl(pageUrl)) {
-    out.th = entry.thumbnailUrl;
-  }
-  return out;
-}
-
-function decodeEntry(raw: unknown, songs: TrackIdentity[], section: string): HistoryEntry {
-  const c = rec(raw, section);
-  const identity = songAt(songs, c.i, section);
-  const updatedAt = num(c.at, section);
-  const pageUrl = c.url === undefined ? defaultPageUrl(identity.normalizedUrl) : str(c.url, section);
-  const thumbnailUrl = c.th === undefined ? youtubeThumbnailUrl(pageUrl) : str(c.th, section);
-  const entry: HistoryEntry = {
-    identity: { ...identity },
-    params: decodeParams(c.p, section),
-    pageUrl,
-    createdAt: updatedAt,
-    updatedAt,
-  };
-  if (thumbnailUrl !== undefined) entry.thumbnailUrl = thumbnailUrl;
-  if (c.x === 1) entry.deleted = true;
-  return entry;
-}
-
-function encodeFavorite(entry: FavoriteEntry, songs: SongTable): CompactFavorite {
-  const out: CompactFavorite = {
-    ...encodeEntry(entry, songs),
-    fa: stamp(entry.favoritedAt),
-    la: stamp(entry.lastAccessedAt),
-  };
-  if (entry.orderedAt) out.oa = stamp(entry.orderedAt);
-  return out;
-}
-
-function decodeFavorite(raw: unknown, songs: TrackIdentity[]): FavoriteEntry {
-  const c = rec(raw, 'favorites');
-  const favorite: FavoriteEntry = {
-    ...decodeEntry(c, songs, 'favorites'),
-    favoritedAt: num(c.fa, 'favorites'),
-    lastAccessedAt: num(c.la, 'favorites'),
-  };
-  if (c.oa !== undefined) favorite.orderedAt = num(c.oa, 'favorites');
-  return favorite;
-}
-
-// ---------------------------------------------------------------------------
-// Tracks
-
-function encodeMarker(marker: Marker): CompactMarker {
-  const t = millis(marker.t);
-  return marker.label ? [t, marker.label] : [t];
-}
-
-function decodeMarker(raw: unknown, index: number): Marker {
-  const r = arr(raw, 'tracks');
-  if (r.length < 1 || r.length > 2) throw damaged('tracks');
+  const recent = object(local.recent);
+  for (const row of Object.values(recent)) { object(row); number(row.updatedAt); number(row.lastAccessedAt); }
   return {
-    id: `m${index + 1}`,
-    t: num(r[0], 'tracks') / 1000,
-    label: r.length === 2 ? str(r[1], 'tracks') : '',
+    shared: parseShared(source.shared),
+    local: { uiPrefs: defaults(local.uiPrefs, DEFAULT_UI_PREFS), recent, charts,
+      ...(local.lastUsedParams ? { lastUsedParams: defaults(local.lastUsedParams, DEFAULT_PARAMS) } : {}) },
   };
 }
-
-function encodeOverrides(overrides: SnippetOverrides | undefined): CompactOverrides {
-  const out: CompactOverrides = {};
-  if (!overrides) return out;
-  if (typeof overrides.speed === 'number') out.s = round3(overrides.speed);
-  if (typeof overrides.transpose === 'number') out.t = round3(overrides.transpose);
-  if (typeof overrides.vocalReduce === 'number') out.v = round3(overrides.vocalReduce);
-  return out;
-}
-
-function decodeOverrides(raw: unknown): SnippetOverrides {
-  const c = rec(raw, 'tracks');
-  const out: SnippetOverrides = {};
-  if (c.s !== undefined) out.speed = num(c.s, 'tracks');
-  if (c.t !== undefined) out.transpose = num(c.t, 'tracks');
-  if (c.v !== undefined) out.vocalReduce = num(c.v, 'tracks');
-  return out;
-}
-
-function encodeSnippet(snippet: Snippet): CompactSnippet {
-  // `repeats: Infinity` is `null` once it has been through JSON (storage);
-  // both mean "forever", written as 0 — real counts start at 1.
-  const repeats =
-    typeof snippet.repeats === 'number' && Number.isFinite(snippet.repeats) ? snippet.repeats : 0;
-  const overrides = encodeOverrides(snippet.overrides);
-  const out: CompactSnippet = [
-    snippet.name ?? '',
-    millis(snippet.startT),
-    millis(snippet.endT),
-    repeats,
-    snippet.enabled === false ? 0 : 1,
-    overrides,
-  ];
-  // Trailing defaults are left out: `{}` overrides, enabled, one repeat.
-  const isDefault = (v: unknown) => v === 1 || (isRecord(v) && Object.keys(v).length === 0);
-  while (out.length > 3 && isDefault(out[out.length - 1])) out.pop();
-  return out;
-}
-
-function decodeSnippet(raw: unknown, index: number): Snippet {
-  const r = arr(raw, 'tracks');
-  if (r.length < 3 || r.length > 6) throw damaged('tracks');
-  const repeats = r.length > 3 ? num(r[3], 'tracks') : 1;
-  return {
-    id: `c${index + 1}`,
-    name: str(r[0], 'tracks'),
-    startT: num(r[1], 'tracks') / 1000,
-    endT: num(r[2], 'tracks') / 1000,
-    enabled: r.length > 4 ? num(r[4], 'tracks') === 1 : true,
-    repeats: repeats === 0 ? Infinity : repeats,
-    overrides: r.length > 5 ? decodeOverrides(r[5]) : {},
-  };
-}
-
-export function encodeChart(chart: ChordChart): CompactChart {
-  const segments = [...chart.segments].sort((a, b) => a.startT - b.startT);
-  const d: number[] = [];
-  const g: number[] = [];
-  const l: string[] = [];
-  const i: number[] = [];
-  const labelIndex = new Map<string, number>();
-  let t0 = 0;
-  let prevEnd = 0;
-  let anyGap = false;
-  segments.forEach((seg, n) => {
-    const start = centis(seg.startT);
-    const end = Math.max(start, centis(seg.endT));
-    if (n === 0) {
-      t0 = start;
-      g.push(0);
-    } else {
-      const gap = start - prevEnd;
-      if (gap !== 0) anyGap = true;
-      g.push(gap);
-    }
-    d.push(end - start);
-    let li = labelIndex.get(seg.label);
-    if (li === undefined) {
-      li = l.length;
-      l.push(seg.label);
-      labelIndex.set(seg.label, li);
-    }
-    i.push(li);
-    prevEnd = end;
-  });
-  const out: CompactChart = {
-    t0,
-    d,
-    l,
-    i,
-    cov: round3(chart.coverage ?? 0),
-    a0: centis(chart.analyzedFrom ?? 0),
-    a1: centis(chart.analyzedTo ?? 0),
-    c: stamp(chart.computedAt),
-  };
-  if (anyGap) out.g = g;
-  if (chart.key) {
-    out.k = [chart.key.tonic, chart.key.mode === 'minor' ? 1 : 0, round3(chart.key.confidence)];
-  }
-  return out;
-}
-
-export function decodeChart(raw: unknown): ChordChart {
-  const c = rec(raw, 'tracks');
-  const d = arr(c.d, 'tracks');
-  const l = arr(c.l, 'tracks').map((label) => str(label, 'tracks'));
-  const i = arr(c.i, 'tracks');
-  const g = c.g === undefined ? undefined : arr(c.g, 'tracks');
-  if (i.length !== d.length || (g !== undefined && g.length !== d.length)) throw damaged('tracks');
-  const segments: ChordSegment[] = [];
-  let acc = num(c.t0, 'tracks');
-  for (let n = 0; n < d.length; n++) {
-    const li = num(i[n], 'tracks');
-    if (!Number.isInteger(li) || li < 0 || li >= l.length) throw damaged('tracks');
-    const start = acc + (g === undefined ? 0 : num(g[n], 'tracks'));
-    const end = start + num(d[n], 'tracks');
-    segments.push({ startT: start / 100, endT: end / 100, label: l[li], confidence: 1 });
-    acc = end;
-  }
-  let key: ChordChart['key'] = null;
-  if (c.k !== undefined) {
-    const k = arr(c.k, 'tracks');
-    if (k.length !== 3) throw damaged('tracks');
-    key = {
-      tonic: str(k[0], 'tracks'),
-      mode: num(k[1], 'tracks') === 1 ? 'minor' : 'major',
-      confidence: num(k[2], 'tracks'),
-    };
-  }
-  return {
-    segments,
-    key,
-    coverage: num(c.cov, 'tracks'),
-    analyzedFrom: num(c.a0, 'tracks') / 100,
-    analyzedTo: num(c.a1, 'tracks') / 100,
-    computedAt: num(c.c, 'tracks'),
-  };
-}
-
-function encodeTrack(track: TrackData, songs: SongTable): CompactTrack {
-  const out: CompactTrack = { i: songs.add(track.identity), at: stamp(track.updatedAt) };
-  if (track.markers?.length) out.m = track.markers.map(encodeMarker);
-  if (track.snippets?.length) out.s = track.snippets.map(encodeSnippet);
-  if (track.sequenceLoop) out.L = 1;
-  if (track.sequenceCountIn) out.C = 1;
-  if (track.chordsEnabled !== undefined) out.ce = track.chordsEnabled ? 1 : 0;
-  if (track.chordChart) out.ch = encodeChart(track.chordChart);
-  return out;
-}
-
-function decodeTrack(raw: unknown, songs: TrackIdentity[]): TrackData {
-  const c = rec(raw, 'tracks');
-  const track: TrackData = {
-    identity: { ...songAt(songs, c.i, 'tracks') },
-    markers: c.m === undefined ? [] : arr(c.m, 'tracks').map(decodeMarker),
-    snippets: c.s === undefined ? [] : arr(c.s, 'tracks').map(decodeSnippet),
-    sequenceLoop: c.L !== undefined,
-    sequenceCountIn: c.C !== undefined,
-    chordChart: c.ch === undefined ? null : decodeChart(c.ch),
-    updatedAt: num(c.at, 'tracks'),
-  };
-  if (c.ce !== undefined) track.chordsEnabled = num(c.ce, 'tracks') === 1;
-  return track;
-}
-
-// ---------------------------------------------------------------------------
-// Whole backup
-
-/** `[name, gains, updatedAt?]`, or `[name, [], updatedAt, 1]` tombstoned. */
-function encodeEqPreset(preset: EqPreset): CompactEqPreset {
-  const name = preset.name ?? '';
-  if (preset.deleted) return [name, [], stamp(preset.updatedAt ?? 0), 1];
-  const gains = (preset.gains ?? []).map(round2);
-  return preset.updatedAt ? [name, gains, stamp(preset.updatedAt)] : [name, gains];
-}
-
-function decodeEqPreset(raw: unknown): EqPreset {
-  const r = arr(raw, 'eqPresets');
-  if (r.length < 2 || r.length > 4) throw damaged('eqPresets');
-  const preset: EqPreset = {
-    name: str(r[0], 'eqPresets'),
-    gains: arr(r[1], 'eqPresets').map((g) => num(g, 'eqPresets')),
-  };
-  if (r.length >= 3) preset.updatedAt = num(r[2], 'eqPresets');
-  if (r.length === 4) preset.deleted = true;
-  return preset;
-}
-
-const byKey = (a: { identity: TrackIdentity }, b: { identity: TrackIdentity }) =>
-  a.identity.key < b.identity.key ? -1 : a.identity.key > b.identity.key ? 1 : 0;
-
-/** Deterministic for equal input: tracks are sorted by key (their storage
- * enumeration order is arbitrary) and the song table is filled in Recent,
- * Favorites, tracks order. */
-export function encodeBackup(backup: Backup): CompactBackup {
-  const songs = new SongTable();
-  const h = backup.history.map((e) => encodeEntry(e, songs));
-  const f = backup.favorites.map((e) => encodeFavorite(e, songs));
-  const t = [...backup.tracks].sort(byKey).map((track) => encodeTrack(track, songs));
-  const out: CompactBackup = {
-    format: BACKUP_FORMAT,
-    version: COMPACT_VERSION,
-    at: stamp(backup.exportedAt),
-    s: encodeSettings(backup.settings),
-    u: encodeUiPrefs(backup.uiPrefs),
-    eq: backup.eqPresets.map(encodeEqPreset),
-    songs: songs.rows,
-    h,
-    f,
-    t,
-  };
-  if (backup.settings.updatedAt) out.sat = stamp(backup.settings.updatedAt);
-  if (backup.uiPrefs.updatedAt) out.uat = stamp(backup.uiPrefs.updatedAt);
-  return out;
-}
-
-/** Defaults alone need no sync blob; customized settings do, even without
- * songs. A tombstone counts as a song — it is the only record that the row
- * was removed, and seeding without it would resurrect the row elsewhere. */
-export function isEmptyBackup(backup: Backup): boolean {
-  const { songs, eq, s, u } = encodeBackup(backup);
-  return songs.length === 0 && eq.length === 0 &&
-    Object.keys(s).length === 0 && Object.keys(u).length === 0;
-}
-
-/** Reads a compact (v2) backup, or throws an `Error` whose message is safe to
- * show the user. Unknown keys are ignored so the format can grow. */
-export function decodeBackup(raw: unknown): Backup {
-  if (!isRecord(raw) || raw.format !== BACKUP_FORMAT || raw.version !== COMPACT_VERSION) {
-    throw new Error("That file isn't a Note by Note backup.");
-  }
-  const songs = decodeSongs(raw.songs);
-  const settings = decodeSettings(raw.s);
-  const uiPrefs = decodeUiPrefs(raw.u);
-  if (typeof raw.sat === 'number' && Number.isFinite(raw.sat)) settings.updatedAt = raw.sat;
-  if (typeof raw.uat === 'number' && Number.isFinite(raw.uat)) uiPrefs.updatedAt = raw.uat;
-  return {
-    format: BACKUP_FORMAT,
-    version: COMPACT_VERSION,
-    exportedAt: typeof raw.at === 'number' && Number.isFinite(raw.at) ? raw.at : 0,
-    appVersion: '',
-    settings,
-    uiPrefs,
-    history: arr(raw.h, 'history').map((e) => decodeEntry(e, songs, 'history')),
-    favorites: arr(raw.f, 'favorites').map((e) => decodeFavorite(e, songs)),
-    eqPresets: arr(raw.eq, 'eqPresets').map(decodeEqPreset),
-    tracks: arr(raw.t, 'tracks').map((t) => decodeTrack(t, songs)),
-  };
-}
-
-/** The verbose v1 file: the in-memory shape, written out as is. Objects are
- * backfilled from the defaults so a file from an older build gains any setting
- * added since, and every row's key is re-derived — v1 files were written when
- * a key baked in the duration, and rows that split across two of those are one
- * song again here (`rekey.ts`, `track-identity.ts`). */
-function normalizeV1(raw: Record<string, unknown>): Backup {
-  return {
-    format: BACKUP_FORMAT,
-    version: BACKUP_VERSION,
-    exportedAt: typeof raw.exportedAt === 'number' ? raw.exportedAt : 0,
-    appVersion: typeof raw.appVersion === 'string' ? raw.appVersion : '',
-    settings: {
-      ...DEFAULT_SETTINGS,
-      ...(isRecord(raw.settings) ? raw.settings : {}),
-    } as Settings,
-    uiPrefs: {
-      ...(JSON.parse(JSON.stringify(DEFAULT_UI_PREFS)) as UiPrefs),
-      ...(isRecord(raw.uiPrefs) ? raw.uiPrefs : {}),
-    },
-    history: rekeyByIdentity(identifiedArr<HistoryEntry>(raw.history, 'history')),
-    favorites: rekeyByIdentity(identifiedArr<FavoriteEntry>(raw.favorites, 'favorites')),
-    eqPresets: arr(raw.eqPresets, 'eqPresets') as EqPreset[],
-    tracks: rekeyByIdentity(identifiedArr<TrackData>(raw.tracks, 'tracks')),
-  };
-}
-
-/**
- * Reads a parsed backup file (any version this build knows) into a `Backup`,
- * or throws an `Error` whose message is safe to show the user.
- */
-export function parseBackupJson(raw: unknown): Backup {
-  if (!isRecord(raw) || raw.format !== BACKUP_FORMAT) {
-    throw new Error("That file isn't a Note by Note backup.");
-  }
-  const version = typeof raw.version === 'number' ? raw.version : 0;
-  if (version > COMPACT_VERSION) {
-    throw new Error('That backup was made by a newer version of Note by Note.');
-  }
-  if (version === COMPACT_VERSION) return decodeBackup(raw);
-  if (version === BACKUP_VERSION) return normalizeV1(raw);
-  // Only 2 lands here, and only from the branch this format grew on.
-  throw new Error('That backup is in a format this version of Note by Note no longer reads.');
+export function parseBackupJson(value: unknown): Backup {
+  const raw = object(value);
+  if (raw.format !== BACKUP_FORMAT) throw new Error("That file isn't a Note by Note backup.");
+  if (raw.version > BACKUP_VERSION) throw new Error('That backup was made by a newer version of Note by Note.');
+  const library = raw.version === BACKUP_VERSION ? parseLibrary(raw) : migrateBackup(parseLegacy(raw));
+  return { format: BACKUP_FORMAT, version: BACKUP_VERSION, exportedAt: raw.exportedAt ?? raw.at ?? 0, ...library };
 }

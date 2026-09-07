@@ -1,5 +1,6 @@
 import { DEFAULT_KEYMAP, DEFAULT_SETTINGS, DEFAULT_UI_PREFS } from '../../../core/model/defaults';
 import type { PanelId, SectionId, Settings, UiPrefs } from '../../../core/model/types';
+import { editLibrary } from '../../../core/persist/library-client';
 import { settingsItem, uiPrefsItem } from '../../../core/persist/storage';
 
 /** Settings synced two-way with storage.local. Components mutate via `update`. */
@@ -55,7 +56,7 @@ class SettingsStore {
       // `current` rune, so nested `keymap`/`lastUsedParams` are still proxies.
       // Firefox structured-clones storage writes and throws DataCloneError on a
       // proxy — settings would apply for the session but never persist.
-      await settingsItem.setValue($state.snapshot(next) as Settings);
+      await editLibrary({ type: 'settings', patch: $state.snapshot(patch) as Partial<Settings> });
     } finally {
       this.#writing = false;
     }
@@ -64,7 +65,7 @@ class SettingsStore {
   async reset() {
     this.current = { ...structuredClone(DEFAULT_SETTINGS), updatedAt: Date.now() };
     this.onChange?.(this.current);
-    await settingsItem.setValue($state.snapshot(this.current) as Settings);
+    await editLibrary({ type: 'settings', patch: {}, reset: true });
   }
 }
 

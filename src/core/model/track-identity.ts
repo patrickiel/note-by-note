@@ -14,7 +14,7 @@ function normalizeUrl(rawUrl: string): string {
   const host = url.hostname.replace(/^www\./, '');
 
   // Site-aware rules: keep only the media id where we know it.
-  if (host.endsWith('youtube.com')) {
+  if ((host === 'youtube.com' || host.endsWith('.youtube.com'))) {
     const v = url.searchParams.get('v');
     if (v) return `https://youtube.com/watch?v=${v}`;
     // Shorts / embeds carry the id in the path.
@@ -64,7 +64,12 @@ function hash(text: string): string {
  * a page can hold more than one song.
  */
 export function songKey(identity: Pick<TrackIdentity, 'normalizedUrl' | 'title'>): string {
-  return hash(`${identity.normalizedUrl}\n${identity.title}`);
+  const url = identity.normalizedUrl;
+  if (url.startsWith('https://youtube.com/watch?v=')) return 'yt:' + url.slice('https://youtube.com/watch?v='.length);
+  // Local-player URLs include a browser-specific extension ID. The file name
+  // is the existing local-file discriminator; it must work across installations.
+  if (/^(chrome|moz)-extension:/.test(url)) return 'file:' + hash(cleanTitle(identity.title));
+  return 'web:' + hash(url);
 }
 
 /** Whether two library rows describe the same song. */

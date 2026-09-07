@@ -1,3 +1,4 @@
+import { startLibraryBackground } from '@/core/persist/library-background';
 import type { OffscreenCommand } from '@/core/messaging/protocol';
 import { onMessage } from '@/core/messaging/rpc';
 import { grantedOriginsItem } from '@/core/persist/storage';
@@ -69,6 +70,7 @@ async function syncFromPermissions() {
 }
 
 export default defineBackground(() => {
+  startLibraryBackground();
   // Scope the panel to the tabs it was opened on: the manifest's
   // `side_panel.default_path` enables it everywhere, so once opened it would
   // follow the user to every tab. With the default disabled and the click

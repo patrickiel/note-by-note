@@ -18,7 +18,6 @@
     parseBackup,
     restoreBackup,
   } from '@/core/persist/backup';
-  import { encodeBackup } from '@/core/persist/backup-codec';
   import { history } from '@/features/library/panel/history.svelte';
   import { applyTheme, settings } from '@/features/settings/panel/settings.svelte';
   import { session } from '@/core/state/session.svelte';
@@ -139,7 +138,7 @@
       const backup = await createBackup();
       // The compact form — a fraction of the verbose one and the shape that
       // will ride the browser's sync storage; import reads both.
-      const text = JSON.stringify(encodeBackup(backup));
+      const text = JSON.stringify(backup, null, 2);
       const blob = new Blob([text], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -149,7 +148,7 @@
       // The download reads the blob after click() returns, so the URL has to
       // outlive this task.
       setTimeout(() => URL.revokeObjectURL(url), 0);
-      const songs = backup.history.length + backup.favorites.length;
+      const songs = Object.values(backup.shared.songs).filter((song) => song.practice.value !== null).length;
       const kb = Math.max(1, Math.round(new TextEncoder().encode(text).length / 1024));
       notice = { ok: true, text: `Saved ${link.download} (${songs} songs, ${kb} KB).` };
     } catch (err) {
@@ -171,13 +170,11 @@
           // The import records what it drops (`deletions.ts`), and those
           // records travel — so with sync on this is not only about this
           // device, and the prompt has to say so.
-          (sync.enabled ? ' Your other synced devices lose the same songs.' : ''),
+          (sync.enabled ? ' The replacement of saved practice data, favorites, presets and settings also syncs.' : ''),
       );
       if (!ok) return;
-      await restoreBackup(backup, { asNew: true });
-      // Every store reads storage once at start-up; a reload is the honest way
-      // to get the whole panel — theme, open track, engine — onto new data.
-      location.reload();
+      await restoreBackup(backup);
+      notice = { ok: true, text: 'Backup imported. Reopen the current song to use its imported practice settings.' };
     } catch (err) {
       notice = { ok: false, text: `Import failed: ${message(err)}` };
     } finally {
@@ -501,7 +498,7 @@
       <div class="flex items-center gap-3 py-2.5 px-3">
         {@render prefText(
           'Sync between devices',
-          "Keep your settings, songs, presets, markers and snippets the same everywhere. Uses your browser's built-in sync: sign in to the browser with sync turned on and it reaches your other devices. No account with us, no server.",
+          "Sync saved practice settings, favorites, presets, markers and snippets. Recent, layout and chord analysis stay on this device. Uses your browser's built-in sync: sign in to the browser with sync turned on and it reaches your other devices. No account with us, no server.",
         )}
         <Toggle
           bind:checked={() => sync.enabled, (on) => void setSyncEnabled(on)}
@@ -509,29 +506,6 @@
         />
       </div>
       {#if sync.enabled}
-        {#if sync.pendingApply}
-          <div class="flex items-center gap-3 py-2.5 px-3 border-t border-line">
-            {@render prefText(
-              'Changes from another device are waiting',
-              'They are applied when no song is loaded, or now — applying reloads the panel.',
-            )}
-            <button
-              type="button"
-              class="flex-none py-1 px-2 text-[13px] font-bold text-accent-ink rounded-sm hover:not-disabled:bg-accent-soft disabled:opacity-40 disabled:cursor-default"
-              disabled={syncBusy || sync.status === 'syncing'}
-              onclick={() => void sync.syncNow()}
-              {@attach tooltip('Apply the changes now')}
-            >
-              Apply
-            </button>
-          </div>
-        {/if}
-        {#if sync.trimmed}
-          <div class="text-[12px] text-muted py-2.5 px-3 border-t border-line">
-            The browser's sync storage is full, so the oldest songs and chord charts stay
-            on this device only. Everything else syncs.
-          </div>
-        {/if}
         <div class="flex items-center gap-3 py-2.5 px-3 border-t border-line">
           <span
             class={[
@@ -554,7 +528,7 @@
             class="flex-none py-1 px-2 text-[13px] font-bold text-accent-ink rounded-sm hover:not-disabled:bg-accent-soft disabled:opacity-40 disabled:cursor-default"
             disabled={syncBusy || sync.status === 'syncing'}
             onclick={() => void sync.syncNow()}
-            {@attach tooltip('Back up now and pull in changes from your other devices')}
+            {@attach tooltip('Sync saved data; your current practice session keeps playing')}
           >
             Sync now
           </button>
@@ -594,7 +568,7 @@
         <span class="flex-none flex justify-center w-6 text-muted"
           ><Icon name="download" size={18} /></span
         >
-        {@render prefText('Backup file', 'Export or import all your data. Rarely needed with sync on.')}
+        {@render prefText('Backup file', 'Export or import everything, including local history and chord analysis.')}
         <div class="flex-none flex items-center gap-1">
           <button
             type="button"

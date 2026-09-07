@@ -8,7 +8,6 @@
   import { sendMessage } from '@/core/messaging/rpc';
   import { openTabWithPanel } from '@/core/side-panel';
   import { installMockState, installMockTicker } from '@/dev/mock';
-  import { migrateStorage } from '@/core/persist/migrate';
   import { connection } from '@/core/state/connect.svelte';
   import { CAN_CAPTURE_TAB } from '@/core/platform';
   import { features } from '@/core/features';
@@ -27,7 +26,7 @@
   // to read (see core/persist/migrate.ts). Each panel feature then loads its
   // own storage concurrently (see core/features.ts).
   const loadFeatures = () => Promise.all(features.map((f) => f.init?.()));
-  const ready = migrateStorage().then(loadFeatures).then(
+  const ready = loadFeatures().then(
     async () => {
       applyTheme(settings.current.theme);
       trackSync.init();
@@ -36,9 +35,6 @@
           console.error('[note-by-note] track sync failed', err);
         });
       };
-      // Applying another device's changes reloads this document, so a merge
-      // that arrived mid-practice waits for the track to go away.
-      session.onMediaChanged = (media) => sync.onMedia(media);
       session.onUserParamsChange = () => trackSync.onParamsChanged();
       session.onEngineDetached = () => trackSync.onEngineLost();
       // Diagnostics for the E2E harness; kept out of release builds.

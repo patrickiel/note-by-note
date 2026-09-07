@@ -131,6 +131,7 @@ export default defineConfig({
     // there is no such probe; the Settings copy tells the user instead).
     permissions: [
       'storage',
+      'alarms',
       'activeTab',
       'scripting',
       'tabs',

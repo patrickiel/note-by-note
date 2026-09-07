@@ -1,3 +1,4 @@
+import type { Library, LibraryCommand } from '../persist/library';
 import type {
   ConnectionState,
   EffectParams,
@@ -121,6 +122,9 @@ export type OffscreenCommand =
 
 /** RPC handled by the background service worker (via @webext-core/messaging). */
 export interface ProtocolMap {
+  libraryRead(): Promise<Library>;
+  libraryEdit(command: LibraryCommand): Promise<void>;
+  librarySync(action: 'now' | 'enable' | 'disable' | 'delete'): Promise<void>;
   /** Request per-origin host permission, inject + persist the content script.
    * Must run after the side panel already obtained the permission grant. */
   ensureInjected(data: { tabId: number }): Promise<{ ok: boolean; error?: string }>;
