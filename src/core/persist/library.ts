@@ -47,11 +47,15 @@ export function canonical(value: unknown): string {
   return JSON.stringify(value) ?? 'null';
 }
 export function newest<T>(a: Versioned<T>, b: Versioned<T>): Versioned<T> {
+  if (a.at === b.at) {
+    const deleted = (value: T) => value === null || value === false;
+    if (deleted(a.value) !== deleted(b.value)) return deleted(a.value) ? a : b;
+  }
   return a.at > b.at || (a.at === b.at && canonical(a.value) >= canonical(b.value)) ? a : b;
 }
 function mergeMap<T>(a: Record<string, T>, b: Record<string, T>, merge: (a: T, b: T) => T) {
   return Object.fromEntries([...new Set([...Object.keys(a), ...Object.keys(b)])].sort()
-    .map((key) => [key, a[key] && b[key] ? merge(a[key], b[key]) : a[key] ?? b[key]]));
+    .map((key) => [key, Object.hasOwn(a, key) && Object.hasOwn(b, key) ? merge(a[key], b[key]) : Object.hasOwn(a, key) ? a[key] : b[key]]));
 }
 export function mergeShared(a: SharedLibrary, b: SharedLibrary): SharedLibrary {
   return {
@@ -134,7 +138,9 @@ export function applyCommand(library: Library, command: LibraryCommand, now = Da
       break;
     }
     case 'uiPrefs': local.uiPrefs = command.value; break;
-    case 'preset': shared.presets[command.name] = cell(command.gains, at); break;
+    case 'preset': Object.defineProperty(shared.presets, command.name, {
+      value: cell(command.gains, at), enumerable: true, writable: true, configurable: true,
+    }); break;
     case 'import': {
       const file = structuredClone(command.library);
       const revision = Math.max(at, nextRevision(file.shared, now));
@@ -144,7 +150,8 @@ export function applyCommand(library: Library, command: LibraryCommand, now = Da
         shared.songs[key] = { practice: cell(song?.practice.value ?? null, revision), favorite: cell(song?.favorite.value ?? false, revision) };
       }
       for (const name of new Set([...Object.keys(shared.presets), ...Object.keys(file.shared.presets)])) {
-        shared.presets[name] = cell(file.shared.presets[name]?.value ?? null, revision);
+        Object.defineProperty(shared.presets, name, { value: cell(Object.hasOwn(file.shared.presets, name) ? file.shared.presets[name].value : null, revision),
+          enumerable: true, writable: true, configurable: true });
       }
       shared.settings = cell(file.shared.settings.value, revision);
       shared.favoriteOrder = cell(file.shared.favoriteOrder.value, revision);

@@ -10,12 +10,15 @@ function normalizeUrl(rawUrl: string): string {
   } catch {
     return rawUrl;
   }
+  if (url.protocol === 'chrome-extension:' || url.protocol === 'moz-extension:') {
+    return `${url.protocol}//${url.host}${url.pathname}`;
+  }
 
   const host = url.hostname.replace(/^www\./, '');
 
   // Site-aware rules: keep only the media id where we know it.
-  if ((host === 'youtube.com' || host.endsWith('.youtube.com'))) {
-    const v = url.searchParams.get('v');
+  if (host === 'youtube.com' || host.endsWith('.youtube.com')) {
+    const v = url.searchParams.get('v') ?? /^\/(?:shorts|embed)\/([^/]+)/.exec(url.pathname)?.[1];
     if (v) return `https://youtube.com/watch?v=${v}`;
     // Shorts / embeds carry the id in the path.
     return `https://youtube.com${url.pathname}`;

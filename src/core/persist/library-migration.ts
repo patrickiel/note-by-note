@@ -47,6 +47,8 @@ export function migrateBackup(backup: Backup): Library {
   shared.favoriteOrder = cell(backup.favorites.filter((f) => !f.deleted)
     .map((f) => makeTrackIdentity(f.identity.normalizedUrl, f.identity.title, f.identity.durationSec).key),
     Math.max(0, ...backup.favorites.map((f) => f.orderedAt ?? f.favoritedAt ?? 0)));
-  for (const preset of backup.eqPresets) shared.presets[preset.name] = cell(preset.deleted ? null : preset.gains, preset.updatedAt ?? 0);
+  for (const preset of backup.eqPresets) Object.defineProperty(shared.presets, preset.name, {
+    value: cell(preset.deleted ? null : preset.gains, preset.updatedAt ?? 0), enumerable: true, writable: true, configurable: true,
+  });
   return library;
 }
