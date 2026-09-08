@@ -185,6 +185,21 @@ test('released version-1 backups import parameters, favorites, markers and prese
   assert.deepEqual(parseBackupJson(exported), exported);
 });
 
+test('version-1 URL aliases migrate to one favorite with the newest practice data', () => {
+  const entries = ['https://youtube.com/shorts/example', 'https://youtube.com/embed/example',
+    'https://youtube.com/watch?v=example'].map((url, i) => ({
+    identity: { key: 'old:' + i, normalizedUrl: url, title: 'Song', durationSec: 100 },
+    pageUrl: url, params: { ...DEFAULT_PARAMS, speed: 0.5 + i * 0.1 },
+    updatedAt: i + 1, favoritedAt: i + 1, lastAccessedAt: i + 1,
+  }));
+  const migrated = parseBackupJson({ format: 'note-by-note-backup', version: 1,
+    history: entries, favorites: entries, tracks: [], eqPresets: [] });
+  assert.deepEqual(Object.keys(migrated.shared.songs), ['yt:example']);
+  assert.deepEqual(migrated.shared.favoriteOrder, ['yt:example']);
+  assert.equal(migrated.shared.songs['yt:example'].practice.params!.speed, 0.7);
+  assert.equal(migrated.local.recent['yt:example'], 3);
+});
+
 test('new backups round-trip and reject malformed or unsupported formats', () => {
   const backup = { format: 'note-by-note-backup', version: 2, exportedAt: 100, ...save() };
   assert.deepEqual(parseBackupJson(JSON.parse(JSON.stringify(backup))), backup);

@@ -103,10 +103,16 @@ Runes stores (classes with `$state`), one singleton exported per file. All panel
   library-client.ts commands and one storage watch. Commands patch the latest saved
   data; Recent and Favorites are projections, not persistent song copies.
 - Track-sync loads a practice session once and submits edits to the saved library.
+  Restoration uses the initialized panel mirror and does not emit user edits.
+  Parameter, marker and snippet edits capture their track and values before being
+  coalesced; pending patches remain readable until the library watch acknowledges
+  their committed revision. Switching tracks or hiding the panel flushes the batch.
   Receiving remote changes never reloads or silently replaces the active session.
   Explicit imports reload active sessions and advance a device-local import
   revision; the writer rejects practice edits carrying an older revision.
   Feature persistence is wired directly in track-sync; there is no descriptor registry.
+- The writer validates the resulting library before every command commit. Connection
+  failures use connection state; only library initialization can open recovery.
 - Sync copies the same SharedLibrary snapshot used locally (records.ts). One
   updatedAt timestamp chooses the whole winner; equal dates adopt the remote copy.
   There are no field merges, deletion markers, or automatic song pruning. Song

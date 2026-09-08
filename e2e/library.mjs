@@ -48,6 +48,39 @@ try {
   const second = await panel();
   await sync(first, 'disable');
   await edit(first, { type: 'import', library: emptyLibrary() });
+
+  // Exercise App's real startup without an actual website or player. A failed
+  // injection RPC must leave the library usable and show connection state.
+  const disconnected = await browser.newPage();
+  disconnected.on('pageerror', (error) => panelErrors.push(error.message));
+  await disconnected.evaluateOnNewDocument(() => {
+    chrome.tabs.get = (_id, callback) => {
+      const tab = { id: 123, url: 'https://example.test/song' };
+      if (callback) { callback(tab); return; }
+      return Promise.resolve(tab);
+    };
+    chrome.permissions.contains = (_permissions, callback) => {
+      if (callback) { callback(true); return; }
+      return Promise.resolve(true);
+    };
+    const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+    chrome.runtime.sendMessage = (...args) => {
+      if (args[0]?.type === 'ensureInjected') {
+        globalThis.__injectionFailed = true;
+        throw new Error('Simulated injection RPC failure');
+      }
+      return send(...args);
+    };
+  });
+  const beforeConnection = await read(first);
+  await disconnected.goto(first.url().replace('?mock=1', '?tabId=123'));
+  await disconnected.waitForSelector('button[aria-label="Settings"]');
+  await disconnected.waitForFunction(() => globalThis.__injectionFailed && globalThis.__panelDebug?.connection() === 'stale');
+  assert.equal(await disconnected.$('main[aria-label="Library recovery"]'), null);
+  assert.deepEqual(await read(disconnected), beforeConnection);
+  await disconnected.close();
+  console.log('PASS injection failure keeps the library open and uses normal connection state');
+
   await first.bringToFront();
   await first.waitForSelector('button[aria-label="Settings"]');
   await first.click('button[aria-label="Settings"]');
@@ -81,6 +114,12 @@ try {
   })));
   assert.equal(Object.keys((await read(first)).shared.songs).length, 12);
   console.log('PASS concurrent panels preserve all 12 songs');
+
+  const beforeInvalid = await read(first);
+  await assert.rejects(edit(first, { type: 'practice', identity: identity(0),
+    patch: { markers: [{ id: 'invalid', t: null, label: 'Invalid time' }] }, recent: true }), /Damaged library number/);
+  assert.deepEqual(await read(first), beforeInvalid);
+  console.log('PASS invalid edits leave the persisted library unchanged');
 
   await Promise.all([
     edit(first, { type: 'practice', identity: identity(0), patch: { markers: [{ id: 'm', t: 5, label: 'Verse' }] }, recent: true }),
@@ -202,7 +241,7 @@ try {
   await recovery.setViewport({ width: 400, height: 700 });
   await recovery.waitForSelector('main[aria-label="Library recovery"]');
   assert.match(await recovery.$eval('main', (node) => node.textContent), /saved data is still on this device/);
-  await recovery.screenshot({ path: resolve(root, '.output', 'pr12-recovery.png') });
+  await recovery.screenshot({ path: resolve(root, '.output', 'library-recovery.png') });
   const file = join(profile, 'restore.json');
   writeFileSync(file, JSON.stringify({ format: 'note-by-note-backup', version: 2, exportedAt: Date.now(), ...recoveryBackup }));
   recovery.once('dialog', (dialog) => dialog.accept());

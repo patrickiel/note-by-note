@@ -15,7 +15,7 @@
       link.download = 'note-by-note-recovery.json';
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 0);
-      notice = 'Recovery data exported. Keep this file to recover any damaged records.';
+      notice = 'Original data exported. Keep this file for recovery; it is not an importable backup.';
     } catch (error) { notice = message(error); }
   }
 
@@ -36,11 +36,11 @@
 
 <main class="p-5 text-fg" aria-label="Library recovery">
   <h1 class="text-lg font-semibold">Your saved library could not be opened</h1>
-  <p class="mt-3 text-sm">Your saved data is still on this device. Retry, export it for recovery, or restore a Note by Note backup.</p>
+  <p class="mt-3 text-sm">Your saved data is still on this device. Retry, keep a copy of the original data, or restore an existing Note by Note backup.</p>
   <p class="mt-2 text-sm text-muted">{message(error)}</p>
   <div class="mt-4 flex flex-wrap gap-3 text-sm">
     <button class="rounded border border-line px-3 py-2" onclick={() => location.reload()} disabled={busy}>Retry</button>
-    <button class="rounded border border-line px-3 py-2" onclick={exportRecovery} disabled={busy}>Export recovery data</button>
+    <button class="rounded border border-line px-3 py-2" onclick={exportRecovery} disabled={busy}>Export original data</button>
     <label class="rounded border border-line px-3 py-2">
       Import backup
       <input type="file" accept=".json,application/json" class="mt-2 block max-w-full" aria-label="Import backup" onchange={importFile} disabled={busy} />

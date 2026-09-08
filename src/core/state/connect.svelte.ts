@@ -87,6 +87,16 @@ class ConnectionManager {
 
   async #connect() {
     const generation = ++this.#generation;
+    try {
+      await this.#attach(generation);
+    } catch (error) {
+      if (generation !== this.#generation) return;
+      session.connection = 'stale';
+      console.error('[note-by-note] connecting to the player failed', error);
+    }
+  }
+
+  async #attach(generation: number) {
     this.#port?.disconnect();
     this.#port = null;
     session.detachTransport();

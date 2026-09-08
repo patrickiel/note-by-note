@@ -13,6 +13,6 @@ export function parseBackup(text: string): Backup {
   try { raw = JSON.parse(text); } catch { throw new Error("That file isn't valid JSON."); }
   return parseBackupJson(raw);
 }
-export function restoreBackup(backup: Backup): Promise<void> {
-  return editLibrary({ type: 'import', library: backup });
+export async function restoreBackup(backup: Backup): Promise<void> {
+  await editLibrary({ type: 'import', library: backup });
 }

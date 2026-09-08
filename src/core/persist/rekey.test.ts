@@ -71,3 +71,16 @@ test('re-running it changes nothing', () => {
   const once = rekeyByIdentity([stored(URL_A, 'Song', 200, 10), stored(URL_B, 'Two', 90, 20)]);
   assert.deepEqual(rekeyByIdentity(once), once);
 });
+
+test('previously distinct shorts, embed and watch URLs collapse before migration', () => {
+  const rows = ['https://youtube.com/shorts/aaaaaaaaaaa',
+    'https://youtube.com/embed/aaaaaaaaaaa', 'https://youtube.com/watch?v=aaaaaaaaaaa'].map((url, i) => ({
+    ...stored(url, 'Song', 100, i + 1),
+    identity: { key: 'old:' + i, normalizedUrl: url, title: 'Song', durationSec: 100 },
+  }));
+  const result = rekeyByIdentity(rows);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].identity.key, 'yt:aaaaaaaaaaa');
+  assert.equal(result[0].updatedAt, 3);
+  assert.deepEqual(rekeyByIdentity(result), result);
+});

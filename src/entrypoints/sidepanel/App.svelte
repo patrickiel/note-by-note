@@ -26,7 +26,9 @@
   $effect(() => applyTheme(settings.current.theme));
   $effect(pushSettings);
 
-  const ready = library.init().then(
+  // Only a saved-library failure belongs in the recovery screen.
+  const ready = library.init();
+  void ready.then(
     async () => {
       trackSync.init();
       session.onMediaEvent = (media) => {
@@ -53,7 +55,7 @@
         if (mockPlay) installMockTicker();
       } else await connection.init();
     },
-  );
+  ).catch((error) => console.error('[note-by-note] initializing panel failed', error));
 
   // Opened from here rather than via the background: the side panel has to
   // follow the user to the player tab, and only this document holds the
@@ -72,6 +74,11 @@
     else void connection.stopCapture();
   }
 </script>
+
+<svelte:window onpagehide={() => trackSync.flush()} />
+<svelte:document onvisibilitychange={() => {
+  if (document.visibilityState === 'hidden') trackSync.flush();
+}} />
 
 {#await ready then}
   <div class="relative h-full overflow-hidden">

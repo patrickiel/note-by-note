@@ -71,7 +71,11 @@ export function startLibraryBackground() {
       });
       const shared = remote ? newestSnapshot(local.shared, remote) : local.shared;
       const adopting = shared !== local.shared;
-      if (adopting) { await begin(); await libraryItem.setValue({ ...local, shared }); }
+      if (adopting) {
+        await begin();
+        await libraryItem.setValue({ ...local, shared });
+        config.lastSyncedAt = Date.now();
+      }
       config.lastError = null;
       delete config.incompleteSince;
       delete config.incompleteHash;
@@ -114,10 +118,12 @@ export function startLibraryBackground() {
       await init();
       current = await libraryItem.getValue();
     }
-    const next = applyCommand(current, data);
+    // Reject malformed edits before they can poison the next worker startup.
+    const next = parseLibrary(applyCommand(current, data));
     await libraryItem.setValue(next);
     if (data.type === 'import') ready = Promise.resolve();
     if (current.shared.updatedAt !== next.shared.updatedAt) await schedule();
+    return next.shared.updatedAt;
   }));
   onMessage('librarySync', ({ data }) => enqueue(async () => {
     const config = await loadSyncConfig();

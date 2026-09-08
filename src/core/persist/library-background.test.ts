@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 import { applyCommand, emptyLibrary } from './library.ts';
+import { makeTrackIdentity } from '../model/track-identity.ts';
 import { bytesUsed, encodeSnapshot, readSnapshot, PREFIX, SNAPSHOT_KEY } from '../../features/sync/persist/records.ts';
 
 // Bundle the real worker with only its browser/RPC boundaries replaced. Each
@@ -147,4 +148,53 @@ test('a damaged saved library stays intact and can be replaced through the recov
   assert.deepEqual(library.shared.presets, restored.shared.presets);
   assert.deepEqual(h.areas.local.libraryRecovery, damaged);
   assert.equal(library.local.importRevision, 1);
+});
+
+test('invalid edits are rejected without writing or poisoning the next worker startup', async () => {
+  const original = saved();
+  const h = harness({ library: original, syncConfig: { ...config, enabled: false } });
+  await h.start();
+  await h.rpc('libraryRead');
+  h.writes.length = 0;
+  const identity = makeTrackIdentity('https://youtube.com/watch?v=validation', 'Song', 100);
+  const invalid = [
+    { type: 'practice', identity, patch: { markers: [{ id: 'm', t: NaN, label: 'Bad time' }] }, recent: true },
+    { type: 'practice', identity, patch: { snippets: [{ id: 's', name: 'Bad range', startT: NaN,
+      endT: 20, repeats: 1, enabled: true, overrides: {} }] }, recent: true },
+    { type: 'settings', patch: { seekInterval: NaN } },
+    { type: 'preset', name: 'Bad gains', gains: [NaN] },
+  ];
+  for (const command of invalid) {
+    await assert.rejects(h.rpc('libraryEdit', JSON.parse(JSON.stringify(command))), /Damaged/);
+    assert.deepEqual(h.areas.local.library, original);
+  }
+  assert.deepEqual(h.writes, []);
+  await h.start();
+  assert.deepEqual(await h.rpc('libraryRead'), original);
+  const revision = await h.rpc('libraryEdit', { type: 'preset', name: 'Valid after rejection', gains: [2] });
+  assert.equal(revision, h.areas.local.library.shared.updatedAt);
+  assert.deepEqual(h.areas.local.library.shared.presets['Valid after rejection'], [2]);
+});
+
+test('validation preserves infinite snippet repeats encoded as null', async () => {
+  const h = harness({ library: saved(), syncConfig: { ...config, enabled: false } });
+  await h.start();
+  const identity = makeTrackIdentity('https://youtube.com/watch?v=infinite', 'Song', 100);
+  await h.rpc('libraryEdit', JSON.parse(JSON.stringify({ type: 'practice', identity, recent: true,
+    patch: { snippets: [{ id: 's', name: 'Repeat', startT: 2, endT: 8, repeats: Infinity, enabled: true, overrides: {} }] } })));
+  await h.start();
+  assert.equal((await h.rpc('libraryRead')).shared.songs[identity.key].practice.snippets[0].repeats, null);
+});
+
+test('adopting headerless remote data dates the pull even while header repair is rate limited', async (t) => {
+  t.mock.method(Date, 'now', () => 100000);
+  const library = saved();
+  const remote = { ...library.shared, updatedAt: 200, presets: { Remote: [2] } };
+  const { items } = await encodeSnapshot(remote);
+  delete items[SNAPSHOT_KEY];
+  const h = harness({ library, syncConfig: { ...config, lastPushAt: 99999 } }, items);
+  await h.start();
+  assert.deepEqual(h.areas.local.library.shared, remote);
+  assert.equal(h.areas.local.syncConfig.lastSyncedAt, 100000);
+  assert.equal(h.writes.filter((w) => w.area === 'sync').length, 0);
 });

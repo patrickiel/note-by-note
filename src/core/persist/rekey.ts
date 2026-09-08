@@ -1,4 +1,4 @@
-import { songKey } from '../model/track-identity.ts';
+import { makeTrackIdentity } from '../model/track-identity.ts';
 import type { TrackIdentity } from '../model/types';
 
 /**
@@ -17,7 +17,7 @@ export interface Keyed {
 const at = (row: Keyed) => row.updatedAt ?? 0;
 
 /**
- * Rows under the key `songKey` derives from them now, with copies that land on
+ * Rows under the identity derived from their URL now, with copies that land on
  * the same key collapsed to the most recently written one — a song saved under
  * two durations was always one song, and this is where its copies finally meet.
  *
@@ -30,8 +30,9 @@ export function rekeyByIdentity<T extends Keyed>(rows: T[]): T[] {
   const byKey = new Map<string, T>();
   for (const row of rows) {
     if (typeof row?.identity?.normalizedUrl !== 'string') continue;
-    const key = songKey(row.identity);
-    const next = { ...row, identity: { ...row.identity, key } };
+    const identity = makeTrackIdentity(row.identity.normalizedUrl, row.identity.title, row.identity.durationSec);
+    const key = identity.key;
+    const next = { ...row, identity };
     const current = byKey.get(key);
     if (!current || at(next) >= at(current)) byKey.set(key, next);
   }
