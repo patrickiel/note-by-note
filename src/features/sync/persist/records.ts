@@ -20,14 +20,14 @@ async function decompress(data: string): Promise<string> {
   const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
   return new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
 }
-async function hash(data: string): Promise<string> {
+export async function hash(data: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', encoder.encode(data));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 export class IncompleteSnapshot extends Error {
-  readonly updatedAt: number;
-  constructor(updatedAt: number) {
+  readonly updatedAt: number | null;
+  constructor(updatedAt: number | null) {
     super('Waiting for the complete synced library. All data is kept on this device.');
     this.updatedAt = updatedAt;
   }
@@ -37,7 +37,15 @@ export class IncompleteSnapshot extends Error {
 export async function readSnapshot(items: Record<string, any>): Promise<SharedLibrary | null> {
   const header = items[SNAPSHOT_KEY];
   if (!header) {
-    if (Object.keys(items).some((key) => key.startsWith(PREFIX + 'chunk:'))) throw new IncompleteSnapshot(Infinity);
+    if (Object.keys(items).some((key) => key.startsWith(PREFIX + 'chunk:'))) {
+      // A lost header need not lose the snapshot: gzip verifies its own checksum.
+      // Recover its revision from complete slots before choosing which copy wins.
+      const chunks = Array.from({ length: MAX_CHUNKS }, (_, n) => items[PREFIX + 'chunk:' + n] ?? '');
+      try {
+        if (chunks.some((chunk) => typeof chunk !== 'string')) throw new Error('Damaged chunk.');
+        return parseShared(JSON.parse(await decompress(chunks.join(''))));
+      } catch { throw new IncompleteSnapshot(null); }
+    }
     return null;
   }
   if (header.version !== 1) throw new Error('Unsupported synced data. Update Note by Note on all devices.');

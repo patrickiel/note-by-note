@@ -2,13 +2,14 @@ import { DEFAULT_PARAMS } from '../model/defaults';
 import { makeTrackIdentity } from '../model/track-identity';
 import type { EffectParams, HistoryEntry, MediaInfo, TrackIdentity } from '../model/types';
 import type { Practice } from '../persist/library';
-import { editLibrary, readLibrary } from '../persist/library-client';
+import { editLibrary, libraryItem, readLibrary } from '../persist/library-client';
 import { openTabWithPanel } from '../side-panel';
 import { session } from './session.svelte';
 import { settings } from '../../features/settings/panel/settings.svelte';
 import { markers } from '../../features/markers/panel/markers.svelte';
 import { snippets } from '../../features/snippets/panel/snippets.svelte';
 import { chords } from '../../features/chords/panel/chords.svelte';
+import { library } from './library.svelte';
 
 /** An active session loads saved data once. Library updates never interrupt playback. */
 class TrackSync {
@@ -18,18 +19,35 @@ class TrackSync {
   #restoring = false;
   #hasSavedParams = false;
   #chordsEnabled = false;
+  #importRevision = 0;
   /** Parameter changes arrive per input event while a slider is dragged, and
    * every save rewrites the whole library. Coalesce them into one write. */
   #paramsTimer: ReturnType<typeof setTimeout> | undefined;
 
   init() {
+    this.#importRevision = library.current.local.importRevision ?? 0;
+    libraryItem.watch((value) => {
+      const revision = value?.local.importRevision ?? 0;
+      if (revision === this.#importRevision) return;
+      this.#importRevision = revision;
+      // An explicit import replaces the open session too. Never flush pending
+      // pre-import edits; the background also rejects already queued stale edits.
+      clearTimeout(this.#paramsTimer);
+      this.#paramsTimer = undefined;
+      this.#generation++;
+      this.#identity = null;
+      session.stopSequence();
+      session.clearLoop();
+      void this.onMedia(this.#media).catch((error) => console.error('[note-by-note] loading imported practice failed', error));
+    });
     markers.onPersist = (list) => this.#save({ markers: list });
     snippets.onPersist = () => this.#save({ snippets: $state.snapshot(snippets.list),
       sequenceLoop: snippets.sequenceLoop, sequenceCountIn: snippets.sequenceCountIn });
     chords.onPersist = () => {
       if (!this.#identity || this.#restoring) return;
       // Generated analysis is local and does not date the saved practice record.
-      void editLibrary({ type: 'chart', key: this.#identity.key, chart: $state.snapshot(chords.chart) });
+      void editLibrary({ type: 'chart', key: this.#identity.key, chart: $state.snapshot(chords.chart),
+        importRevision: this.#importRevision }).catch((error) => console.error('[note-by-note] saving chart failed', error));
       if (this.#chordsEnabled !== chords.enabled) {
         this.#chordsEnabled = chords.enabled;
         this.#save({ chordsEnabled: chords.enabled });
@@ -67,6 +85,7 @@ class TrackSync {
     try {
       const saved = await readLibrary();
       if (generation !== this.#generation) return;
+      this.#importRevision = saved.local.importRevision ?? 0;
       const practice = saved.shared.songs[identity.key]?.practice;
       this.#hasSavedParams = !!practice?.params;
       markers.load(practice?.markers ?? []);
@@ -101,14 +120,15 @@ class TrackSync {
     if (this.#restoring) return;
     const params = $state.snapshot(session.params) as EffectParams;
     this.#save({ params });
-    if (settings.current.rememberSettings) void editLibrary({ type: 'settings', patch: { lastUsedParams: params } });
+    if (settings.current.rememberSettings) void editLibrary({ type: 'settings', patch: { lastUsedParams: params },
+      importRevision: this.#importRevision }).catch((error) => console.error('[note-by-note] saving last-used settings failed', error));
   }
 
   #save(patch: Partial<Practice>) {
     if (!this.#identity || this.#restoring) return;
     if (!this.#hasSavedParams) patch = { params: $state.snapshot(session.params), ...patch };
     this.#hasSavedParams = true;
-    void editLibrary({ type: 'practice', identity: this.#identity,
+    void editLibrary({ type: 'practice', identity: this.#identity, importRevision: this.#importRevision,
       patch: { ...patch, pageUrl: this.#media?.pageUrl ?? this.#identity.normalizedUrl,
         thumbnailUrl: this.#media?.thumbnailUrl }, recent: settings.current.autoSave,
     }).catch((error) => console.error('[note-by-note] saving practice failed', error));
@@ -116,6 +136,13 @@ class TrackSync {
 
   async openHistoryEntry(tabId: number | null, entry: HistoryEntry) {
     const playing = this.#identity?.key;
+    if (playing?.startsWith('file:') && entry.identity.key.startsWith('file:') && playing !== entry.identity.key) {
+      // Local files share a player page. Its File object cannot survive a reload
+      // or be restored from a saved URL: apply the chosen preset to the loaded
+      // file, retaining that file's identity, playhead, markers and snippets.
+      session.patchParams($state.snapshot(entry.params) as EffectParams);
+      return;
+    }
     if (playing === entry.identity.key) {
       // Explicitly opening the saved song adopts its current library revision.
       this.#flushParams();
@@ -123,8 +150,9 @@ class TrackSync {
       await this.onMedia(this.#media);
       return;
     }
-    if (tabId != null) await browser.tabs.update(tabId, { url: entry.pageUrl });
-    else await openTabWithPanel(entry.pageUrl);
+    const url = entry.identity.key.startsWith('file:') ? browser.runtime.getURL('/local-player.html') : entry.pageUrl;
+    if (tabId != null) await browser.tabs.update(tabId, { url });
+    else await openTabWithPanel(url);
   }
 }
 export const trackSync = new TrackSync();

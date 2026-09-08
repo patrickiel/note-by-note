@@ -163,7 +163,7 @@
       );
       if (!ok) return;
       await restoreBackup(backup);
-      notice = { ok: true, text: 'Backup imported. Reopen the current song to use its imported practice settings.' };
+      notice = { ok: true, text: 'Backup imported. Open songs now use the imported practice settings.' };
     } catch (err) {
       notice = { ok: false, text: `Import failed: ${message(err)}` };
     } finally {

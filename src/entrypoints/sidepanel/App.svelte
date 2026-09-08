@@ -5,6 +5,7 @@
   import LibraryView from '@/features/library/panel/LibraryView.svelte';
   import SettingsView from '@/features/settings/panel/SettingsView.svelte';
   import TooltipLayer from '@/ui/shared/TooltipLayer.svelte';
+  import LibraryRecovery from '@/ui/LibraryRecovery.svelte';
   import { sendMessage } from '@/core/messaging/rpc';
   import { openTabWithPanel } from '@/core/side-panel';
   import { installMockState, installMockTicker } from '@/dev/mock';
@@ -101,4 +102,6 @@
     <!-- Last child, fixed-positioned: one bubble that outranks every sheet. -->
     <TooltipLayer />
   </div>
+{:catch error}
+  <LibraryRecovery {error} />
 {/await}

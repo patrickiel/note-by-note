@@ -27,6 +27,8 @@ export interface Library {
     lastAccessed: Record<string, number>;
     charts: Record<string, ChordChart | null>;
     lastUsedParams?: EffectParams;
+    /** Invalidates edits from sessions opened before a replacement import. */
+    importRevision?: number;
   };
 }
 
@@ -43,6 +45,7 @@ export function emptyLibrary(): Library {
 
 /** One winner for the entire library. On equal timestamps the synced copy wins. */
 export function newestSnapshot(local: SharedLibrary, remote: SharedLibrary): SharedLibrary {
+  if (local.updatedAt === remote.updatedAt && JSON.stringify(local) === JSON.stringify(remote)) return local;
   return local.updatedAt > remote.updatedAt ? local : remote;
 }
 
@@ -51,22 +54,28 @@ export type UiPrefsPatch = {
 };
 
 export type LibraryCommand =
-  | { type: 'practice'; identity: TrackIdentity; patch: Partial<Practice>; recent: boolean }
+  | { type: 'practice'; identity: TrackIdentity; patch: Partial<Practice>; recent: boolean; importRevision?: number }
   | { type: 'favorite'; key: string; value: boolean }
   | { type: 'order'; keys: string[] }
   | { type: 'visit'; key: string }
   | { type: 'recent.remove'; key?: string }
-  | { type: 'chart'; key: string; chart: ChordChart | null }
-  | { type: 'settings'; patch: Partial<Settings>; reset?: boolean }
+  | { type: 'chart'; key: string; chart: ChordChart | null; importRevision?: number }
+  | { type: 'settings'; patch: Partial<Settings>; reset?: boolean; importRevision?: number }
   | { type: 'uiPrefs'; patch: UiPrefsPatch }
   | { type: 'preset'; name: string; gains: number[] | null }
   | { type: 'import'; library: Library };
 
 /** Only the background writes. Commands from panels patch the current snapshot. */
 export function applyCommand(library: Library, command: LibraryCommand, now = Date.now()): Library {
+  if ((command.type === 'practice' || command.type === 'chart'
+    || (command.type === 'settings' && command.importRevision !== undefined))
+    && (command.importRevision ?? 0) !== (library.local.importRevision ?? 0)) {
+    throw new Error('A backup was imported. Reload the song before saving more practice edits.');
+  }
   const next = structuredClone(command.type === 'import' ? command.library : library);
   const { shared, local } = next;
   switch (command.type) {
+    case 'import': local.importRevision = (library.local.importRevision ?? 0) + 1; break;
     case 'practice': {
       const key = command.identity.key;
       const song = shared.songs[key] ?? { practice: {
@@ -82,7 +91,10 @@ export function applyCommand(library: Library, command: LibraryCommand, now = Da
     }
     case 'favorite': {
       const song = shared.songs[command.key];
-      if (!song) break;
+      if (!song) {
+        if (command.value) throw new Error('This song is no longer in the library. Save it before adding it to Favorites.');
+        break;
+      }
       song.favoritedAt = command.value ? now : null;
       shared.favoriteOrder = shared.favoriteOrder.filter((key) => key !== command.key);
       if (command.value) shared.favoriteOrder.unshift(command.key);

@@ -11,8 +11,10 @@ class SyncStore {
   status = $derived(!this.enabled ? 'off' : this.config.syncing ? 'syncing' : this.lastError ? 'error' : 'idle');
   usedPercent = $derived(Math.round(this.config.usedBytes / QUOTA_BYTES * 100));
   async init() {
-    this.config = await loadSyncConfig();
-    syncConfigItem.watch((value) => { this.config = withSyncDefaults(value); });
+    let changed = false;
+    syncConfigItem.watch((value) => { changed = true; this.config = withSyncDefaults(value); });
+    const initial = await loadSyncConfig();
+    if (!changed) this.config = initial;
   }
   enable = () => sendMessage('librarySync', 'enable');
   disable = () => sendMessage('librarySync', 'disable');

@@ -16,16 +16,19 @@ function isLocalPlayer(url: string | undefined): boolean {
 
 /** A fresh engine starts on the default preset, so this runs on every attach as
  * well as on change — a no-op while nothing is attached. */
-export function pushSettings() {
-  session.send({
-    type: 'settings',
+let lastSettings = '';
+export function pushSettings(force = false) {
+  const command = {
+    type: 'settings' as const,
     seekInterval: settings.current.seekInterval,
     lowLatency: settings.current.lowLatency,
     formantPreserved: settings.current.formantPreserved,
     countInBeats: settings.current.countInBeats,
     countInBpm: settings.current.countInBpm,
     countInBeep: settings.current.countInBeep,
-  });
+  };
+  const serialized = JSON.stringify(command);
+  if ((force || serialized !== lastSettings) && session.send(command)) lastSettings = serialized;
 }
 
 /** Side-panel side of the connection: binds the session store to the engine in
@@ -152,7 +155,7 @@ class ConnectionManager {
     });
     session.attachTransport((cmd) => port.send(cmd));
     port.send({ type: 'hello' });
-    pushSettings();
+    pushSettings(true);
   }
 
   /** "No compatible player": engine finds nothing but the tab is audible. */

@@ -177,8 +177,9 @@ are views of that song, so there are no saved-settings copies to keep aligned.
 The background is the only library writer; it handles edits, imports and remote
 updates even when the panel is closed. Each panel loads and watches one library;
 settings, UI preferences, presets and song lists read that same copy.
-An active practice session keeps its loaded
-configuration until the song is reopened. Sync never reloads the panel.
+An active practice session keeps its loaded configuration when sync arrives.
+An explicit backup import reloads open songs with the imported practice settings
+and cancels pending edits from before the import. Sync never reloads the panel.
 
 Local storage and sync use the same shared library snapshot, with one timestamp.
 The most recently edited snapshot replaces the older copy in full. On equal
@@ -199,6 +200,9 @@ Importing a backup replaces the entire library and dates it
 as a new edit for sync, including removal of songs absent from the file. Old local
 storage is retained as a recovery copy after the first migration. Upgrade all
 devices before using the new sync format; older builds cannot read it.
+Automatic migration recovers valid songs and fields independently of damaged
+records. If a saved library cannot be opened, the panel offers retry, recovery
+export and backup import; importing retains a copy of the damaged library locally.
 
 ## License
 

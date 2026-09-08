@@ -27,7 +27,7 @@ test('missing, reordered and mixed chunks never produce a partial library', asyn
   await assert.rejects(readSnapshot(missing), IncompleteSnapshot);
   const noHeader = { ...items };
   delete noHeader[SNAPSHOT_KEY];
-  await assert.rejects(readSnapshot(noHeader), IncompleteSnapshot);
+  assert.deepEqual(await readSnapshot(noHeader), await readSnapshot(items));
   const { items: other } = await encodeSnapshot(save('other device at the same timestamp'));
   await assert.rejects(readSnapshot({ ...items, [PREFIX + 'chunk:0']: other[PREFIX + 'chunk:0'] }), IncompleteSnapshot);
   const reversed = Object.fromEntries(Object.entries(items).reverse());
@@ -59,6 +59,15 @@ test('empty sync storage is distinct from a valid empty library or an incomplete
   assert.deepEqual(await readSnapshot(items), emptyLibrary().shared);
   const broken = { ...items, [PREFIX + 'chunk:0']: '' };
   await assert.rejects(readSnapshot(broken), (error: unknown) => error instanceof IncompleteSnapshot && error.updatedAt === 0);
+});
+
+test('a lost header is recovered from complete chunks with the original revision', async () => {
+  const shared = save();
+  const { items } = await encodeSnapshot(shared);
+  delete items[SNAPSHOT_KEY];
+  assert.deepEqual(await readSnapshot(items), shared);
+  items[PREFIX + 'chunk:0'] = 'interrupted';
+  await assert.rejects(readSnapshot(items), (error: unknown) => error instanceof IncompleteSnapshot && error.updatedAt === null);
 });
 
 test('unsupported and damaged snapshots fail before adoption or upload', async () => {

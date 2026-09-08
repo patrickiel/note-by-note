@@ -6,6 +6,9 @@ export interface SyncConfig {
   lastError: string | null;
   usedBytes: number;
   syncing: boolean;
+  /** Persisted across worker wakes while headerless chunks are still arriving. */
+  incompleteSince?: number;
+  incompleteHash?: string;
 }
 export const DEFAULT_SYNC_CONFIG: SyncConfig = {
   enabled: true, lastSyncedAt: 0, lastPushAt: 0, lastError: null, usedBytes: 0, syncing: false,

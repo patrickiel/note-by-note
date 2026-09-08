@@ -8,6 +8,7 @@ import { makeTrackIdentity } from '../model/track-identity.ts';
 const identity = makeTrackIdentity('https://www.youtube.com/watch?v=example', 'Song', 200);
 const save = (library = emptyLibrary(), speed = 0.8, now = 100) => applyCommand(library, {
   type: 'practice', identity, patch: { params: { ...DEFAULT_PARAMS, speed } }, recent: true,
+  importRevision: library.local.importRevision,
 }, now);
 
 test('Recent and Favorites project the same saved parameters; removing Recent preserves a favorite', () => {
@@ -43,6 +44,25 @@ test('equal timestamps adopt the synced snapshot and stay settled', () => {
   const remote = save(emptyLibrary(), 0.5, 100).shared;
   assert.equal(newestSnapshot(local, remote), remote);
   assert.equal(newestSnapshot(remote, remote), remote);
+  assert.equal(newestSnapshot(local, structuredClone(local)), local, 'identical remote data retains the local object');
+});
+
+test('imports reject edits from old sessions, including songs absent from the backup', () => {
+  const original = save();
+  const imported = applyCommand(original, { type: 'import', library: emptyLibrary() });
+  const command = { type: 'practice' as const, identity, patch: { markers: [{ id: 'old', t: 4, label: 'Old' }] }, recent: true };
+  assert.throws(() => applyCommand(imported, command), /backup was imported/);
+  assert.throws(() => applyCommand(imported, { type: 'chart', key: identity.key, chart: null }), /backup was imported/);
+  assert.throws(() => applyCommand(imported, { type: 'settings', patch: { lastUsedParams: DEFAULT_PARAMS }, importRevision: 0 }), /backup was imported/);
+  const edited = applyCommand(imported, { ...command, importRevision: imported.local.importRevision });
+  assert.equal(edited.shared.songs[identity.key].practice.markers[0].id, 'old');
+  const importedAgain = applyCommand(imported, { type: 'import', library: original });
+  assert.throws(() => applyCommand(importedAgain, { ...command, importRevision: imported.local.importRevision }), /backup was imported/);
+  assert.equal(parseLibrary(importedAgain).local.importRevision, 2);
+});
+
+test('favoriting a missing song reports the failure', () => {
+  assert.throws(() => applyCommand(emptyLibrary(), { type: 'favorite', key: identity.key, value: true }), /no longer in the library/);
 });
 
 test('local activity, layout, last-used parameters and chord analysis never date shared data', () => {

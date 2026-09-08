@@ -23,18 +23,24 @@ function array(value: unknown): any[] {
   return value;
 }
 /** Missing preference groups use defaults, just like missing individual fields. */
-function defaults<T>(value: unknown, fallback: T): T {
-  const source = object(value ?? {});
+export function defaults<T>(value: unknown, fallback: T, recover = false): T {
+  let source: Record<string, any>;
+  try { source = object(value ?? {}); } catch (error) {
+    if (!recover) throw error;
+    return structuredClone(fallback);
+  }
   const result = structuredClone(fallback) as Record<string, any>;
   for (const [key, expected] of Object.entries(result)) {
     if (!(key in source)) continue;
-    const next = source[key];
-    if (expected === null) { if (next !== null) number(next); }
-    else if (Array.isArray(expected)) array(next).forEach(number);
-    else if (typeof expected === 'object') { result[key] = defaults(next, expected); continue; }
-    else if (typeof next !== typeof expected) throw new Error('Damaged library setting.');
-    else if (typeof next === 'number') number(next);
-    result[key] = next;
+    try {
+      const next = source[key];
+      if (expected === null) { if (next !== null) number(next); }
+      else if (Array.isArray(expected)) array(next).forEach(number);
+      else if (typeof expected === 'object') { result[key] = defaults(next, expected, recover); continue; }
+      else if (typeof next !== typeof expected) throw new Error('Damaged library setting.');
+      else if (typeof next === 'number') number(next);
+      result[key] = next;
+    } catch (error) { if (!recover) throw error; }
   }
   return result as T;
 }
@@ -86,10 +92,15 @@ export function parseLibrary(value: unknown): Library {
   const recent = object(local.recent ?? {});
   Object.values(recent).forEach(number);
   Object.values(lastAccessed).forEach(number);
+  if (local.importRevision !== undefined) {
+    number(local.importRevision);
+    if (!Number.isSafeInteger(local.importRevision) || local.importRevision < 0) throw new Error('Damaged import revision.');
+  }
   return {
     shared: parseShared(source.shared),
     local: { uiPrefs: defaults(local.uiPrefs, DEFAULT_UI_PREFS), recent, lastAccessed, charts,
-      ...(local.lastUsedParams ? { lastUsedParams: defaults(local.lastUsedParams, DEFAULT_PARAMS) } : {}) },
+      ...(local.lastUsedParams ? { lastUsedParams: defaults(local.lastUsedParams, DEFAULT_PARAMS) } : {}),
+      ...(local.importRevision !== undefined ? { importRevision: local.importRevision } : {}) },
   };
 }
 export function parseBackupJson(value: unknown): Backup {

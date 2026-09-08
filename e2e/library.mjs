@@ -1,7 +1,7 @@
 /** Background-library integration checks in an isolated Chrome profile.
  * Run after `wxt build --mode testing`: node e2e/library.mjs */
 import assert from 'node:assert/strict';
-import { globSync, mkdtempSync } from 'node:fs';
+import { globSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,7 +36,9 @@ async function rpc(page, type, data) {
   }, { type, data });
 }
 const read = (page) => rpc(page, 'libraryRead');
-const edit = (page, command) => rpc(page, 'libraryEdit', command);
+const edit = async (page, command) => rpc(page, 'libraryEdit',
+  command.type === 'practice' || command.type === 'chart'
+    ? { ...command, importRevision: (await read(page)).local.importRevision ?? 0 } : command);
 const sync = (page, action) => rpc(page, 'librarySync', action);
 const identity = (n) => makeTrackIdentity(`https://youtube.com/watch?v=integration${n}`, `Song ${n}`, 200);
 
@@ -172,6 +174,11 @@ try {
 
   const large = Array.from({ length: 5000 }, (_, n) => ({ id: `m${n}`, t: n, label: crypto.randomUUID() }));
   await edit(reopened, { type: 'practice', identity: identity(100), patch: { markers: large }, recent: true });
+  // Capacity is checked only when an upload is due, before any remote write.
+  await reopened.evaluate(async () => {
+    const { syncConfig } = await chrome.storage.local.get('syncConfig');
+    await chrome.storage.local.set({ syncConfig: { ...syncConfig, lastPushAt: 0 } });
+  });
   await sync(reopened, 'now');
   const config = await reopened.evaluate(async () => (await chrome.storage.local.get('syncConfig')).syncConfig);
   assert.match(config.lastError, /storage is full/);
@@ -183,6 +190,27 @@ try {
   assert.equal(Object.keys(await reopened.evaluate(() => chrome.storage.sync.get(null))).length, 0);
   assert.equal((await read(reopened)).shared.songs[identity(100).key].practice.markers.length, 5000);
   console.log('PASS deleting the remote copy disables sync and preserves the local library');
+
+  // A corrupt saved record must expose a working recovery UI on the next wake.
+  const recoveryBackup = await read(reopened);
+  const damaged = structuredClone(recoveryBackup);
+  damaged.local.recent.broken = 'not a date';
+  await reopened.evaluate((library) => chrome.storage.local.set({ library }), damaged);
+  await browser.close();
+  browser = await launch();
+  const recovery = await panel();
+  await recovery.setViewport({ width: 400, height: 700 });
+  await recovery.waitForSelector('main[aria-label="Library recovery"]');
+  assert.match(await recovery.$eval('main', (node) => node.textContent), /saved data is still on this device/);
+  await recovery.screenshot({ path: resolve(root, '.output', 'pr12-recovery.png') });
+  const file = join(profile, 'restore.json');
+  writeFileSync(file, JSON.stringify({ format: 'note-by-note-backup', version: 2, exportedAt: Date.now(), ...recoveryBackup }));
+  recovery.once('dialog', (dialog) => dialog.accept());
+  await (await recovery.$('input[aria-label="Import backup"]')).uploadFile(file);
+  await recovery.waitForSelector('button[aria-label="Settings"]');
+  assert.deepEqual((await read(recovery)).shared.songs, recoveryBackup.shared.songs);
+  assert.deepEqual(await recovery.evaluate(async () => (await chrome.storage.local.get('libraryRecovery')).libraryRecovery), damaged);
+  console.log('PASS corrupt data shows recovery controls and backup import restores the panel');
   assert.deepEqual(panelErrors, [], 'panels must not report unhandled errors');
 } finally {
   await browser?.close();

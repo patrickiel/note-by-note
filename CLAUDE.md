@@ -104,6 +104,8 @@ Runes stores (classes with `$state`), one singleton exported per file. All panel
   data; Recent and Favorites are projections, not persistent song copies.
 - Track-sync loads a practice session once and submits edits to the saved library.
   Receiving remote changes never reloads or silently replaces the active session.
+  Explicit imports reload active sessions and advance a device-local import
+  revision; the writer rejects practice edits carrying an older revision.
   Feature persistence is wired directly in track-sync; there is no descriptor registry.
 - Sync copies the same SharedLibrary snapshot used locally (records.ts). One
   updatedAt timestamp chooses the whole winner; equal dates adopt the remote copy.
@@ -112,12 +114,18 @@ Runes stores (classes with `$state`), one singleton exported per file. All panel
   a hash prevents partial or mixed snapshots from being applied. Capacity failures
   preserve local data and the last successful upload. Background alarms retry
   independently of panels.
+  Identical snapshots do not rewrite storage or toggle sync status. Missing
+  headers are recovered from complete gzip chunks; partial headerless uploads
+  get a persisted grace period before repair from the complete local copy.
 - Backups use the readable v2 library schema. legacy-backup.ts reads the
   released v1 format, and
   library-migration.ts collapses its old copies once.
   Only released formats need compatibility adapters; intermediate PR formats do not.
   Old local storage is retained for recovery, but only local:library is used after
   migration.
+  Automatic legacy migration salvages fields independently (library-recovery.ts).
+  Invalid current libraries remain untouched and open a recovery screen; a valid
+  recovery import retains the damaged value under local:libraryRecovery.
 - Web identity uses provider ID/normalized URL. Title and duration are metadata.
   Local files retain a filename discriminator independent of the extension URL.
 
