@@ -64,6 +64,8 @@ class TrackSync {
   }
 
   onEngineLost() {
+    // Save the analyzer's final chart while it still belongs to this track.
+    chords.onDisconnect();
     this.#flush();
     this.#identity = null;
     this.#media = null;

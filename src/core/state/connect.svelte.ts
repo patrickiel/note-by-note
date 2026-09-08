@@ -158,7 +158,6 @@ class ConnectionManager {
       if (this.#port !== port) return;
       this.#port = null;
       session.detachTransport();
-      chords.onDisconnect();
       if (session.connection !== 'restricted' && session.connection !== 'idle') {
         session.connection = 'stale';
       }

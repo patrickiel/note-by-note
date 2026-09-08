@@ -16,6 +16,7 @@ const stubs: Record<string, string> = {
   '/markers.svelte': 'export const markers = h.markers;',
   '/snippets.svelte': 'export const snippets = h.snippets;',
   '/chords.svelte': 'export const chords = h.chords;',
+  '/btc-chords': 'export class BtcChordEngine {}',
   '/side-panel': 'export const openTabWithPanel = (url) => h.navigations.push(url);',
   '/messaging/ports': 'export const connectToTab = () => h.port;',
   '/messaging/rpc': 'export const sendMessage = (...args) => h.rpc(...args);',
@@ -36,9 +37,10 @@ async function bundle(file: string) {
     } }] });
   return built.outputFiles[0].text;
 }
-const [trackCode, syncCode, connectionCode, sessionCode, settingsCode] = await Promise.all([
+const [trackCode, syncCode, connectionCode, sessionCode, settingsCode, chordsCode] = await Promise.all([
   bundle('./track-sync.svelte.ts'), bundle('../../features/sync/panel/sync.svelte.ts'), bundle('./connect.svelte.ts'),
   bundle('./session.svelte.ts'), bundle('../../features/settings/panel/settings.svelte.ts'),
+  bundle('../../features/chords/panel/chords.svelte.ts'),
 ]);
 let instance = 0;
 const load = (code: string) => import('data:text/javascript;base64,' + Buffer.from(code).toString('base64') + '#' + instance++);
@@ -52,7 +54,7 @@ async function harness(initial: Library) {
     markers: { list: [] as any[], onPersist: null as any, load(list: any[]) { this.list = list; } },
     snippets: { list: [] as any[], sequenceLoop: false, sequenceCountIn: false, onPersist: null as any,
       load(list: any[], loop: boolean, countIn: boolean) { this.list = list; this.sequenceLoop = loop; this.sequenceCountIn = countIn; } },
-    chords: { chart: null, enabled: false, onPersist: null as any, load() {}, onDisconnect() {} },
+    chords: null as unknown as typeof import('../../features/chords/panel/chords.svelte').chords,
     rpc: async (..._args: unknown[]): Promise<any> => ({ ok: true }),
     port: { disconnected: false, disconnect() {}, onMessage() {}, onDisconnect() {}, send(_command: unknown) {} },
     navigations: [] as string[], edits: [] as LibraryCommand[], watch: null as any,
@@ -67,6 +69,7 @@ async function harness(initial: Library) {
     replace(library: Library) { saved = applyCommand(saved, { type: 'import', library }); h.publish(); },
   };
   (globalThis as any).panelTest = h;
+  h.chords = (await load(chordsCode)).chords;
   (globalThis as any).browser = { tabs: { update: (_id: number, { url }: { url: string }) => h.navigations.push(url) } };
   session.attachTransport((command: unknown) => h.commands.push(command));
   return h;
@@ -211,6 +214,28 @@ test('marker and snippet bursts share one immutable save and engine detach flush
   h.session.patchParams({ speed: 0.7 });
   t.mock.timers.tick(2000);
   assert.equal((await h.read()).shared.songs[a.key].practice.params!.speed, 0.7);
+});
+
+test('engine detach saves the final chord chart before clearing the track', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const h = await harness(withMarker('A marker'));
+  const trackSync = await connectTrack(h);
+  await trackSync.onMedia(media);
+  h.chords.setEnabled(true);
+  const chart = { segments: [{ startT: 0, endT: 20, label: 'C', confidence: 1 }], key: null,
+    coverage: 0.2, analyzedFrom: 0, analyzedTo: 20, computedAt: 100 };
+  h.chords.chart = chart;
+  h.chords.phase = 'analyzing';
+  h.session.patchParams({ speed: 0.75 });
+
+  h.session.detachTransport();
+
+  const saved = await h.read();
+  assert.equal(h.chords.phase, 'idle');
+  assert.deepEqual(saved.local.charts[a.key], chart);
+  assert.equal(saved.shared.songs[a.key].practice.params!.speed, 0.75);
+  await trackSync.onMedia(media);
+  assert.deepEqual(h.chords.chart, chart);
 });
 
 test('failed hydration leaves no writable track and a later load can recover', async (t) => {
