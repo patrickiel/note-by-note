@@ -13,7 +13,7 @@ pnpm dev:firefox      # same, Firefox
 pnpm check            # svelte-check / TypeScript — the only type/lint gate
 pnpm build            # production build → .output/chrome-mv3
 pnpm zip              # store package
-pnpm test:dsp         # fast DSP unit tests (node --test on src/features/**/*.test.ts)
+pnpm test:dsp         # fast unit tests: DSP, chords, library and sync records (node --test on src/**/*.test.ts)
 pnpm release:dry      # show the release plan (version bump, tag) without changing anything
 pnpm release          # full release: check + test, bump patch, build both zips, commit, tag, push
 ```
@@ -35,11 +35,9 @@ pnpm dlx @puppeteer/browsers install chrome@stable --path ./.browsers   # once
 node e2e/make-tone.mjs ; node e2e/make-stereo-mix.mjs                    # once, generates WAV fixtures
 pnpm wxt build --mode testing   # `testing` mode grants <all_urls> host perms so no native prompts block the run
 node e2e/run.mjs                # add --headful to watch
+node e2e/library.mjs            # background library + sync integration (pnpm test:e2e:library)
 ```
 The harness plays a 440 Hz tone and asserts on the **processed output** (e.g. 880 Hz after +12 st) via `window.__noteByNoteDebug` in the content script and `window.__panelDebug` in the side panel.
-
-### Sync server (`server/`, separate pnpm workspace)
-`cd server ; pnpm install` — it has its own lockfile, `tsconfig.json` (Cloudflare Workers types), and is `exclude`d from the root tsconfig. See [server/README.md](server/README.md) for deploy. `pnpm run dev` there serves `http://localhost:8787`, which the extension's dev build targets automatically.
 
 ## Architecture
 
@@ -47,13 +45,13 @@ This is a **multi-context extension**. The single most important structural fact
 
 ### Source layout (vertical feature slices)
 The tree is organized by **feature**, not by layer:
-- **`src/core/`** — shared platform: `engine/` (controller, media-engine/-detect, attach-audio), `audio/` (pipeline, fft, silence-detector), `messaging/` (protocol shell, ports, rpc), `model/` (shared types + defaults + format + track-identity + thumbnail), `persist/` (storage, backup, track-data descriptor registry), `state/` (session, track-sync, connect, view), and `features.ts` (the panel-feature registry).
-- **`src/features/<feature>/`** — one folder per product feature (chords, pitch, speed, vocal-reducer, eq, loops, markers, snippets, count-in, library, sync, settings, shortcuts), each with an `engine/` subfolder (content-script code: worklets, schedulers, DSP factories) and/or a `panel/` subfolder (side-panel stores + components), plus optional `protocol.ts` (its wire-message fragment), `panel/panel.ts` (registration object), and `persist.svelte.ts` (per-track descriptor). **`engine/` and `panel/` never cross-import**, so the content and panel bundles stay separate.
+- **`src/core/`** — shared platform: `engine/` (controller, media-engine/-detect, attach-audio), `audio/` (pipeline, fft, silence-detector), `messaging/` (protocol shell, ports, rpc), `model/` (shared types + defaults + format + track-identity + thumbnail), `persist/` (library, backup, migration), and `state/` (session, library, track-sync, connect, view).
+- **`src/features/<feature>/`** — one folder per product feature (chords, pitch, speed, vocal-reducer, eq, loops, markers, snippets, count-in, library, sync, settings, shortcuts), each with an `engine/` subfolder (content-script code: worklets, schedulers, DSP factories) and/or a `panel/` subfolder (side-panel stores + components), plus optional `protocol.ts` (its wire-message fragment). **`engine/` and `panel/` never cross-import**, so the content and panel bundles stay separate.
 - **`src/ui/`** — shared/presentational UI (Workspace, Panel, PanelStack, Timeline, chrome bars, `shared/` primitives, icons, dismiss).
 - **`src/dev/`** — preview-only helpers (`browser-shim`, `mock`).
 - **`src/entrypoints/`** — thin WXT composition roots (unchanged location).
 
-**Dependency direction:** `entrypoints → core composition roots (pipeline, controller, protocol, App, features.ts, track-sync) → features → core primitives (model, messaging, audio/fft, ui)`. Composition roots **import feature contributions** (the "light registration"); **features never import the orchestrators**. Domain types stay central in `core/model/types.ts` (they are the shared engine↔panel wire + persistence contract).
+**Dependency direction:** `entrypoints → core composition roots (pipeline, controller, protocol, App, track-sync) → features → core primitives (model, messaging, audio/fft, ui)`. Composition roots wire feature behavior directly; features never import the orchestrators. Domain types stay central in `core/model/types.ts` (the shared engine↔panel contract).
 
 ### Execution contexts (`src/entrypoints/`)
 - **`sidepanel/`** — the Svelte UI. Holds no engine state of its own; mirrors the active tab's engine.
@@ -93,17 +91,59 @@ Both worklet processors are shipped as **static files under `public/worklets/`**
 
 ### State layer (Svelte 5 runes stores, `*.svelte.ts`)
 Runes stores (classes with `$state`), one singleton exported per file. All panel-side. Split by ownership:
-- **Core (`src/core/state/`):** `session` — mirror of the active tab's engine + the command surface panels call (while no engine is attached, commands fall back to **optimistic local state**, staged and pushed on connect); `connection` (`connect.svelte.ts`) — owns the port lifecycle (one `<all_urls>` prompt from the banner's Connect button in a user gesture, injection, reconnect, capture start/stop; a `#generation` counter drops stale async work) and iterates the **panel-feature registry** ([core/features.ts](src/core/features.ts)) to route engine events into feature stores; `track-sync` — reacts to track changes (auto-save to Recent, reset/remember/carry-over params) and iterates the **per-track descriptor registry** ([core/persist/track-data.ts](src/core/persist/track-data.ts)) to swap each feature's slice in/out of storage; `view`.
+- **Core (`src/core/state/`):** `session` mirrors the active tab's engine and provides panel commands; `library` holds the panel's single saved-data snapshot; `connection` owns permissions, injection, port lifecycle and capture, routing chord events directly; `track-sync` loads saved practice data and wires feature edits; `view` selects the open panel.
 - **Feature-owned (`src/features/<f>/panel/`):** `markers`, `snippets`, `chords`, `settings`, `favorites`/`history` (library), `eq-presets`, `shortcuts`. Preview data (`mock`) lives in `src/dev/`.
-- Features contribute boot init + event routing via `panel/panel.ts` (registered in `core/features.ts`) and per-track persistence via `persist.svelte.ts` (registered in `core/persist/track-data.ts`).
+- App loads the library once. Settings, UI preferences, presets and song lists derive from it; App effects apply the theme and send engine settings. Features submit per-track edits through track-sync. UI preferences are device-local: the panel shows an edit at once and drops the overlay when the storage watch confirms it, so a toggle never waits on the worker.
 
 ### Persistence & sync
-- [storage.ts](src/core/persist/storage.ts) — WXT `storage.defineItem` wrappers (the full storage schema stays central here). **Per-track data is keyed by a normalized track identity** ([track-identity.ts](src/core/model/track-identity.ts)): site-aware URL normalization (strips `t`/`si`/`utm_*` etc.; collapses YouTube to `watch?v=`) + rounded duration, hashed to `local:track:<key>`. The per-track `TrackData` record is assembled/scattered by feature descriptors ([core/persist/track-data.ts](src/core/persist/track-data.ts)). EQ presets and granted origins live in their own items so "Reset Settings" can't wipe them.
-- Optional **cross-device sync** (`src/features/sync/` + `server/`): last-write-wins backup snapshots to a Cloudflare Worker + KV. The secret sync ID **is the whole capability** (open CORS, no other auth). The Worker URLs live once in [sync-hosts.ts](src/features/sync/sync-hosts.ts) (env-free, so `wxt.config.ts` imports it for the manifest); [endpoint.ts](src/features/sync/endpoint.ts) picks localhost in dev, the deployed Worker in prod. The ID rides `storage.sync` between devices and is additionally kept as a **cookie on the sync host** so it survives an uninstall ([id-cookie.ts](src/features/sync/panel/id-cookie.ts) is the canonical explanation). That needs the `cookies` permission plus host access to the sync origin, which is an **optional** host permission requested from the Sync settings / on enable / on connect (a required one would disable the extension on update in Chrome and is opt-in on Firefox); `sync.durable` mirrors whether it is held. The background worker filters the sync host out of the site-grant machinery (`siteOrigins` in [background.ts](src/entrypoints/background.ts)) so it is neither registered for the engine nor removed by Revoke Permissions.
+
+- One local library owns shared songs/settings/presets/order and device-local Recent,
+  UI preferences, last-used parameters and analysis. See core/persist/library.ts.
+- The background service is the only writer (library-background.ts). Panels use
+  library-client.ts commands and one storage watch. Commands patch the latest saved
+  data; Recent and Favorites are projections, not persistent song copies. A saved
+  song outlives Recent (its practice returns when the page is replayed, which is
+  what Auto Save off relies on); clearing history is what removes every
+  non-favorited song, listed or not.
+- Track-sync loads a practice session once and submits edits to the saved library.
+  Restoration uses the initialized panel mirror and does not emit user edits.
+  Parameter, marker and snippet edits capture their track and values before being
+  coalesced; pending patches remain readable until the library watch acknowledges
+  their committed revision. Switching tracks or hiding the panel flushes the batch.
+  Receiving remote changes never reloads or silently replaces the active session.
+  Explicit imports reload active sessions and advance a device-local import
+  revision; the writer rejects practice edits carrying an older revision.
+  Feature persistence is wired directly in track-sync; there is no descriptor registry.
+- The writer validates the resulting library before every command commit. Connection
+  failures use connection state; only library initialization can open recovery.
+- Sync copies the same SharedLibrary snapshot used locally (records.ts). One
+  updatedAt timestamp chooses the whole winner; equal dates adopt the remote copy.
+  There are no field merges or deletion markers. Song dates only support display
+  and sorting. Gzip data spans fixed size-limited slots; a hash prevents partial or
+  mixed snapshots from being applied. An over-budget upload drops the least
+  recently used non-favorited songs (fitSnapshot bisects for the smallest cut) and
+  saves that re-dated trimmed copy locally, so the library and the upload stay one
+  snapshot; nothing is trimmed while sync is off, and an overflow of favorites
+  alone still fails, preserving local data and the last successful upload.
+  Background alarms retry independently of panels.
+  Identical snapshots do not rewrite storage or toggle sync status. Missing
+  headers are recovered from complete gzip chunks; partial headerless uploads
+  get a persisted grace period before repair from the complete local copy.
+- Backups use the readable v2 library schema. legacy-backup.ts reads the
+  released v1 format, and
+  library-migration.ts collapses its old copies once.
+  Only released formats need compatibility adapters; intermediate PR formats do not.
+  Old local storage is retained for recovery, but only local:library is used after
+  migration.
+  Automatic legacy migration salvages fields independently (library-recovery.ts).
+  Invalid current libraries remain untouched and open a recovery screen; a valid
+  recovery import retains the damaged value under local:libraryRecovery.
+- Web identity uses provider ID/normalized URL. Title and duration are metadata.
+  Local files retain a filename discriminator independent of the extension URL.
 
 ## Conventions & gotchas
 - Path alias `@/` → `src/` (so `@/core/*`, `@/features/*`, `@/ui/*`, `@/dev/*` all resolve). WXT provides the `#imports` virtual module (`storage`, `defineBackground`, `defineContentScript`, the `browser` global) — no explicit import of `browser`.
-- **`@/` does not work in two contexts** (they don't share the WXT/Vite resolver): the `node --test` DSP files (`src/features/**/*.test.ts` and the modules they import as *values* — `fft.ts`, `center-cut-dsp.ts`, `detect-bpm.ts`) must use **relative imports with explicit `.ts` extensions**; the esbuild worklet bundles (`src/features/*/engine/*.worklet.ts`) must use **relative imports**. (`import type` is erased, so type-only imports may omit the extension.)
+- **`@/` does not work in two contexts** (they don't share the WXT/Vite resolver): the `node --test` files (`src/**/*.test.ts` and the modules they import as *values* — `fft.ts`, `center-cut-dsp.ts`, `detect-bpm.ts`, `backup-codec.ts`, `sync/persist/records.ts`, `core/persist/{library,library-migration,legacy-backup,rekey}.ts`, and what those pull in: `defaults.ts`, `thumbnail.ts`, `track-identity.ts`) must use **relative imports with explicit `.ts` extensions**; the esbuild worklet bundles (`src/features/*/engine/*.worklet.ts`) must use **relative imports**. (`import type` is erased, so type-only imports may omit the extension.)
 - **Both browsers build MV3** (`manifestVersion: 3` is pinned in [wxt.config.ts](wxt.config.ts) — Firefox would otherwise default to MV2 and drop `optional_host_permissions`). Chromium-only APIs are gated on the build-time flags in [core/platform.ts](src/core/platform.ts) (`CAN_CAPTURE_TAB`, `HAS_SIDE_PANEL_API`), never on runtime `browser.*` probes: Firefox has no `tabCapture`/`offscreen` (so no capture fallback — the offscreen entrypoint is excluded from that build) and no `sidePanel` (the same page is registered as `sidebar_action`). Panel-side the capability travels as a **prop**: an absent `oncapture`/`ontabaudio` is what makes the shared UI drop the affordance.
 - Debug globals are named `__noteByNote*` / `__panelDebug`. The processor name literal is `note-by-note-center-cut` and **must match on both sides** (`vocal-reducer.worklet.ts` registers it, `vocal-reducer.ts` constructs it) — mismatches throw `InvalidStateError` at runtime and `tsc` won't catch them.
 - A `MediaElementSource` can be created only once per element per document lifetime, so **extension reloads require a page reload** to reattach.

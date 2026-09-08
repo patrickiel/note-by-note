@@ -99,7 +99,9 @@ export interface ChordChart {
 /** Stable identity of a piece of media, so settings/markers/snippets survive
  * reloads and URL noise. */
 export interface TrackIdentity {
-  /** `${hash(normalizedUrl)}:${round(duration)}` */
+  /** The saved song's key — see `songKey` in core/model/track-identity.ts.
+   * Derived from the provider id or normalized URL, never from the duration,
+   * which drifts (pre-roll ads, metadata that settles late). */
   key: string;
   normalizedUrl: string;
   title: string;
@@ -115,8 +117,7 @@ export interface TrackData {
   sequenceLoop: boolean;
   /** Count in on play and before each snippet repeat lap (not on section loop). */
   sequenceCountIn: boolean;
-  /** Cached chord/key chart from the last analysis run. null = never analyzed.
-   * (null, not undefined — patches serialize over the port, dropping undefined.) */
+  /** Legacy track shape and local analysis cache. New shared practice excludes this field. */
   chordChart?: ChordChart | null;
   /** Chords panel switch. Kept apart from the chart so switching off hides the
    * panel without discarding the analysis. Undefined on pre-switch records. */
@@ -130,13 +131,14 @@ export interface HistoryEntry {
   params: EffectParams;
   thumbnailUrl?: string;
   pageUrl: string;
-  createdAt: number;
+  /** Last save — the date Recent sorts and displays by. */
   updatedAt: number;
 }
 
 /** A song the user starred (History → Favorites). Persists independently of
  * the LRU-capped Recent list. Stored array order = manual sort order. */
 export interface FavoriteEntry extends HistoryEntry {
+  /** When the song was starred, for display and sorting. */
   favoritedAt: number;
   /** Last time the track was opened or played, for "Last Accessed" sorting. */
   lastAccessedAt: number;

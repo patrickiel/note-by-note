@@ -19,7 +19,7 @@
     restoreBackup,
   } from '@/core/persist/backup';
   import { history } from '@/features/library/panel/history.svelte';
-  import { applyTheme, settings } from '@/features/settings/panel/settings.svelte';
+  import { settings } from '@/features/settings/panel/settings.svelte';
   import { session } from '@/core/state/session.svelte';
   import { view } from '@/core/state/view.svelte';
   import { sync } from '@/features/sync/panel/sync.svelte';
@@ -47,7 +47,7 @@
   let notice = $state<{ ok: boolean; text: string } | null>(null);
 
   /** UI-level view of the `autoReset` / `rememberSettings` pair, which the
-   * settings store keeps mutually exclusive. Both off = carry over. */
+   * background keeps mutually exclusive. Both off = carry over. */
   type NewSongBehavior = 'defaults' | 'keep' | 'lastUsed';
 
   const themeOptions: { value: Theme; label: string; icon: IconName }[] = [
@@ -89,11 +89,6 @@
     });
   }
 
-  function setTheme(value: Theme) {
-    void settings.update({ theme: value });
-    applyTheme(value);
-  }
-
   function setTabAudio(on: boolean) {
     void settings.update({ tabAudio: on });
     ontabaudio?.(on);
@@ -110,7 +105,7 @@
   }
 
   function clearHistoryConfirmed() {
-    if (confirm('Remove all saved songs from the history list?')) {
+    if (confirm('Remove every saved song that is not a Favorite, with its markers, snippets and settings?')) {
       void history.clear();
     }
   }
@@ -118,7 +113,6 @@
   function resetSettingsConfirmed() {
     if (!confirm('Restore all extension settings to their defaults?')) return;
     void settings.reset();
-    applyTheme('auto');
   }
 
   function revokeConfirmed() {
@@ -136,9 +130,8 @@
     notice = null;
     try {
       const backup = await createBackup();
-      const blob = new Blob([JSON.stringify(backup, null, 2)], {
-        type: 'application/json',
-      });
+      const text = JSON.stringify(backup, null, 2);
+      const blob = new Blob([text], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -147,8 +140,9 @@
       // The download reads the blob after click() returns, so the URL has to
       // outlive this task.
       setTimeout(() => URL.revokeObjectURL(url), 0);
-      const songs = backup.history.length + backup.favorites.length;
-      notice = { ok: true, text: `Saved ${link.download} (${songs} songs).` };
+      const songs = Object.keys(backup.shared.songs).length;
+      const kb = Math.max(1, Math.round(new TextEncoder().encode(text).length / 1024));
+      notice = { ok: true, text: `Saved ${link.download} (${songs} songs, ${kb} KB).` };
     } catch (err) {
       notice = { ok: false, text: `Export failed: ${message(err)}` };
     } finally {
@@ -164,13 +158,12 @@
       const backup = parseBackup(await file.text());
       const ok = confirm(
         'Replace all settings, history, favorites, presets, markers and snippets ' +
-          'with the contents of this file? Your current data is lost.',
+          'with the contents of this file? Your current data is lost.' +
+          (sync.enabled ? ' The replacement of saved practice data, favorites, presets and settings also syncs.' : ''),
       );
       if (!ok) return;
       await restoreBackup(backup);
-      // Every store reads storage once at start-up; a reload is the honest way
-      // to get the whole panel — theme, open track, engine — onto new data.
-      location.reload();
+      notice = { ok: true, text: 'Backup imported. Open songs now use the imported practice settings.' };
     } catch (err) {
       notice = { ok: false, text: `Import failed: ${message(err)}` };
     } finally {
@@ -187,20 +180,8 @@
 
   let syncBusy = $state(false);
   let syncNotice = $state<{ ok: boolean; text: string } | null>(null);
-  let connectId = $state('');
-  let idCopied = $state(false);
 
   async function setSyncEnabled(on: boolean) {
-    if (on && sync.syncId && !sync.lastSyncedAt) {
-      // An ID this device never synced with — inherited from another device
-      // through browser sync. Joining is pull-first, same as Connect.
-      const ok = confirm(
-        'A sync ID from your other device was found. Replace all data on this ' +
-          "device with the synced copy? If the ID has no data yet, this device's " +
-          'data is uploaded instead.',
-      );
-      if (!ok) return;
-    }
     syncBusy = true;
     syncNotice = null;
     try {
@@ -211,73 +192,20 @@
     }
   }
 
-  /** An ID arrived from another device while this one already held data. */
-  async function resolveConsent(accept: boolean) {
-    syncBusy = true;
-    syncNotice = null;
-    try {
-      // Accepting reloads the panel, so nothing after it runs.
-      if (accept) await sync.acceptRemote();
-      else await sync.keepLocal();
-    } finally {
-      syncBusy = false;
-    }
-  }
-
   async function deleteSyncedData() {
     const ok = confirm(
-      'Delete the synced copy of your data from the server? Sync will be turned ' +
-        'off. Data on this device is not affected.',
+      "Delete the copy of your data in the browser's sync storage? Sync will be " +
+        'turned off on this device. Data on this device is not affected, and other ' +
+        'devices with sync on will upload their copy again.',
     );
     if (!ok) return;
     syncBusy = true;
     syncNotice = null;
     try {
       await sync.deleteRemote();
-      syncNotice = { ok: true, text: 'Synced data deleted from the server.' };
+      syncNotice = { ok: true, text: 'Synced data deleted.' };
     } catch (err) {
       syncNotice = { ok: false, text: `Delete failed: ${message(err)}` };
-    } finally {
-      syncBusy = false;
-    }
-  }
-
-  async function keepAfterReinstall() {
-    syncNotice = null;
-    if (!(await sync.keepAfterReinstall())) {
-      syncNotice = { ok: false, text: 'Permission not granted — the ID is not kept after a reinstall.' };
-    }
-  }
-
-  async function copySyncId() {
-    if (!sync.syncId) return;
-    await navigator.clipboard.writeText(sync.syncId);
-    idCopied = true;
-    setTimeout(() => (idCopied = false), 1500);
-  }
-
-  async function connectSync() {
-    const id = connectId.trim();
-    if (!id) return;
-    const ok = confirm(
-      'Replace all data on this device with the synced copy? ' +
-        "If the ID has no data yet, this device's data is uploaded instead.",
-    );
-    if (!ok) return;
-    syncBusy = true;
-    syncNotice = null;
-    try {
-      // The 'applied' path never returns here — it reloads the panel.
-      const result = await sync.connectWithId(id);
-      if (result === 'uploaded') {
-        connectId = '';
-        syncNotice = {
-          ok: true,
-          text: "No synced data found for that ID — this device's data was uploaded.",
-        };
-      }
-    } catch (err) {
-      syncNotice = { ok: false, text: `Connect failed: ${message(err)}` };
     } finally {
       syncBusy = false;
     }
@@ -373,7 +301,7 @@
         <SegmentedControl
           options={themeOptions}
           value={settings.current.theme}
-          onchange={setTheme}
+          onchange={(theme) => void settings.update({ theme })}
         />
       </div>
       <div class="flex items-center gap-3 py-2.5 px-3 border-t border-line">
@@ -559,84 +487,14 @@
       <div class="flex items-center gap-3 py-2.5 px-3">
         {@render prefText(
           'Sync between devices',
-          'Keep your settings, songs, presets, markers and snippets the same everywhere. No account needed — devices are linked by a private ID.',
+          "Sync saved practice settings, favorites, presets, markers and snippets. The most recently edited library replaces the older copy, so changes made on two devices at once can overwrite each other. Recent, layout and chord analysis stay on this device. Uses your browser's built-in sync: sign in to the browser with sync turned on and it reaches your other devices. No account with us, no server.",
         )}
-        <!-- Function binding: enabling can be declined in a confirm, so the
-             knob must follow the store instead of flipping optimistically. -->
         <Toggle
           bind:checked={() => sync.enabled, (on) => void setSyncEnabled(on)}
           label="Sync between devices"
         />
       </div>
-      {#if sync.needsConsent}
-        <div class="flex flex-col items-start gap-2 py-2.5 px-3 border-t border-line">
-          {@render prefText(
-            'A sync ID from your other device was found',
-            'This device already has data of its own, so nothing has been changed yet. Use the synced copy and replace what is here, or keep this device and upload it instead.',
-          )}
-          <div class="flex items-center gap-1">
-            <button
-              type="button"
-              class="py-1 px-2 text-[13px] font-bold text-accent-ink rounded-sm hover:not-disabled:bg-accent-soft disabled:opacity-40 disabled:cursor-default"
-              disabled={syncBusy}
-              onclick={() => void resolveConsent(true)}
-              {@attach tooltip('Replace this device’s data with the synced copy')}
-            >
-              Use synced copy
-            </button>
-            <button
-              type="button"
-              class="py-1 px-2 text-[13px] font-bold text-accent-ink rounded-sm hover:not-disabled:bg-accent-soft disabled:opacity-40 disabled:cursor-default"
-              disabled={syncBusy}
-              onclick={() => void resolveConsent(false)}
-              {@attach tooltip('Keep this device’s data and upload it to your other devices')}
-            >
-              Keep this device
-            </button>
-          </div>
-        </div>
-      {/if}
-      {#if sync.enabled && sync.syncId}
-        <div class="flex flex-col items-start gap-2 py-2.5 px-3 border-t border-line">
-          {@render prefText(
-            'Your sync ID',
-            'Devices signed into the same browser profile pick this ID up automatically; elsewhere, enter it by hand. Keep it private — anyone who has it can read and change your data.',
-          )}
-          <div class="flex items-center gap-2 w-full">
-            <code
-              class="flex-1 min-w-0 py-1.5 px-2 text-[11px] break-all select-all text-fg bg-hover border border-line rounded-sm"
-              >{sync.syncId}</code
-            >
-            <button
-              type="button"
-              class="flex-none py-1 px-2 text-[13px] font-bold text-accent-ink rounded-sm hover:not-disabled:bg-accent-soft disabled:opacity-40 disabled:cursor-default"
-              onclick={copySyncId}
-              {@attach tooltip('Copy sync ID')}
-            >
-              {idCopied ? 'Copied' : 'Copy'}
-            </button>
-          </div>
-        </div>
-        <div class="flex items-center gap-3 py-2.5 px-3 border-t border-line">
-          <!-- Copy defers to id-cookie.ts; only what the user acts on is stated. -->
-          {@render prefText(
-            'Keep the ID after a reinstall',
-            sync.durable
-              ? 'On. A copy is kept in this browser profile, outside the extension — but not past clearing the browser’s cookies, so keep a copy for that.'
-              : 'Uninstalling wipes the ID from the extension. Allow access to the sync server’s domain to keep a copy in this browser profile instead — nothing else is accessed.',
-          )}
-          {#if !sync.durable}
-            <button
-              type="button"
-              class="flex-none py-1 px-2 text-[13px] font-bold text-accent-ink rounded-sm hover:not-disabled:bg-accent-soft disabled:opacity-40 disabled:cursor-default"
-              disabled={syncBusy}
-              onclick={() => void keepAfterReinstall()}
-              {@attach tooltip('Allow the extension to keep the ID on the sync server’s domain')}
-            >
-              Allow
-            </button>
-          {/if}
-        </div>
+      {#if sync.enabled}
         <div class="flex items-center gap-3 py-2.5 px-3 border-t border-line">
           <span
             class={[
@@ -648,8 +506,10 @@
               Syncing…
             {:else if sync.status === 'error'}
               {sync.lastError}
+            {:else if sync.lastSyncedAt}
+              Last checked {lastSynced(sync.lastSyncedAt)} · {sync.usedPercent}% of 100 KB used
             {:else}
-              Last synced {lastSynced(sync.lastSyncedAt)}
+              Not checked yet
             {/if}
           </span>
           <button
@@ -657,7 +517,7 @@
             class="flex-none py-1 px-2 text-[13px] font-bold text-accent-ink rounded-sm hover:not-disabled:bg-accent-soft disabled:opacity-40 disabled:cursor-default"
             disabled={syncBusy || sync.status === 'syncing'}
             onclick={() => void sync.syncNow()}
-            {@attach tooltip('Back up now and pull in changes from your other devices')}
+            {@attach tooltip('Sync saved data; your current practice session keeps playing')}
           >
             Sync now
           </button>
@@ -665,57 +525,17 @@
         <div class="flex items-center gap-3 py-2.5 px-3 border-t border-line">
           {@render prefText(
             'Delete synced data',
-            'Removes the copy stored on the sync server and turns sync off. Data on this device is kept.',
+            "Empties the copy in the browser's sync storage and turns sync off here. Data on this device is kept.",
           )}
           <button
             type="button"
             class="flex-none py-1 px-2 text-[13px] font-bold text-accent-ink rounded-sm hover:not-disabled:bg-accent-soft disabled:opacity-40 disabled:cursor-default"
             disabled={syncBusy || sync.status === 'syncing'}
             onclick={() => void deleteSyncedData()}
-            {@attach tooltip('Delete the synced copy from the server')}
+            {@attach tooltip('Delete the synced copy')}
           >
             Delete
           </button>
-        </div>
-      {:else}
-        {#if sync.syncId}
-          <div class="text-[12px] text-muted py-2.5 px-3 border-t border-line">
-            {sync.lastSyncedAt
-              ? 'Sync is off. Turn it back on to keep using your existing sync ID.'
-              : 'A sync ID from your other device was found — turn on sync to use it.'}
-          </div>
-        {:else if sync.enabled}
-          <div class="text-[12px] text-muted py-2.5 px-3 border-t border-line">
-            Sync is on. Your private ID is created as soon as there is something to
-            sync — a song in Recent, a marker, an EQ preset. On a new device, the ID
-            from your other devices arrives through browser sync within a minute or so;
-            if it doesn't, paste it below.
-          </div>
-        {/if}
-        <div class="flex flex-col items-start gap-2 py-2.5 px-3 border-t border-line">
-          {@render prefText(
-            'Connect with a sync ID',
-            'Paste the ID from your other device. Its synced data replaces what is on this device.',
-          )}
-          <div class="flex items-center gap-2 w-full">
-            <input
-              class="flex-1 min-w-0 py-1.5 px-2 font-[monospace] text-[11px] text-fg bg-base border border-line rounded-sm"
-              type="text"
-              placeholder="Sync ID"
-              spellcheck="false"
-              autocomplete="off"
-              bind:value={connectId}
-            />
-            <button
-              type="button"
-              class="flex-none py-1 px-2 text-[13px] font-bold text-accent-ink rounded-sm hover:not-disabled:bg-accent-soft disabled:opacity-40 disabled:cursor-default"
-              disabled={syncBusy || !connectId.trim()}
-              onclick={() => void connectSync()}
-              {@attach tooltip('Connect with sync ID')}
-            >
-              Connect
-            </button>
-          </div>
         </div>
       {/if}
       {#if syncNotice}
@@ -737,7 +557,7 @@
         <span class="flex-none flex justify-center w-6 text-muted"
           ><Icon name="download" size={18} /></span
         >
-        {@render prefText('Backup file', 'Export or import all your data. Rarely needed with sync on.')}
+        {@render prefText('Backup file', 'Export or import everything, including local history and chord analysis.')}
         <div class="flex-none flex items-center gap-1">
           <button
             type="button"
@@ -782,12 +602,12 @@
         <span class="flex-none flex justify-center w-6 text-muted"
           ><Icon name="clearAll" size={18} /></span
         >
-        {@render prefText('Clear history', 'Remove all saved songs from the Recent list.')}
+        {@render prefText('Clear history', 'Delete every saved song that is not a Favorite, with its markers and snippets — including songs no longer listed in Recent.')}
         <button
           type="button"
           class="flex-none py-1 px-2 text-[13px] font-bold text-accent-ink rounded-sm hover:not-disabled:bg-accent-soft disabled:opacity-40 disabled:cursor-default"
           onclick={clearHistoryConfirmed}
-          {@attach tooltip('Remove every saved song from Recent')}
+          {@attach tooltip('Delete every song in Recent; favorites are kept')}
         >
           Clear
         </button>

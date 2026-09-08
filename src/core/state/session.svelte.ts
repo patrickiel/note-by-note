@@ -299,6 +299,16 @@ class SessionStore {
   // ─── Effect params ───────────────────────────────────────────
 
   patchParams(patch: Partial<EffectParams>) {
+    this.#applyParams(patch);
+    this.onUserParamsChange?.();
+  }
+
+  /** Restore playback state without treating it as an edit to the saved song. */
+  restoreParams(params: EffectParams) {
+    this.#applyParams(params);
+  }
+
+  #applyParams(patch: Partial<EffectParams>) {
     if (patch.speed !== undefined) {
       patch.speed = clampSpeed(patch.speed);
     }
@@ -306,7 +316,6 @@ class SessionStore {
     const snapshot = $state.snapshot(patch) as Partial<EffectParams>;
     this.send({ type: 'params', patch: snapshot });
     if (this.capturing) this.captureRelay?.params(snapshot);
-    this.onUserParamsChange?.();
   }
 
   /** Ask the engine to measure the playing tempo and set `baseBpm`. The engine

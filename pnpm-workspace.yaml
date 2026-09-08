@@ -1,5 +1,4 @@
-# Not a monorepo (server/ has its own workspace) — this file exists only to
-# hold pnpm settings, which pnpm 11 reads here rather than from package.json.
+# Not a monorepo — this file exists only to hold pnpm settings, which pnpm 11 reads here rather than from package.json.
 packages: []
 
 # Dependency build scripts. esbuild installs its native binary (the worklet

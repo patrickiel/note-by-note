@@ -1,67 +1,24 @@
-import type { FavoriteEntry, HistoryEntry, TrackIdentity } from '../../../core/model/types';
-import {
-  addFavorite,
-  removeFavorite,
-  setFavoritesOrder,
-} from '../persist/favorites';
-import { isSameTrack } from '../../../core/model/track-identity';
-import { favoritesItem } from '../../../core/persist/storage';
+import type { HistoryEntry, TrackIdentity } from '../../../core/model/types';
+import { favoriteEntries } from '../../../core/persist/library';
+import { editLibrary } from '../../../core/persist/library-client';
+import { library } from '../../../core/state/library.svelte';
 
-/** Every write below is fired from a click handler as a floating promise, and
- * the store only repaints from the `favoritesItem.watch` callback — so a failed
- * write repaints nothing and reads as a dead button. Log instead of vanishing. */
-async function write(what: string, run: () => Promise<void>): Promise<void> {
-  try {
-    await run();
-  } catch (err) {
-    console.error(`[note-by-note] favorites: ${what} failed:`, err);
-  }
-}
+/** The list only repaints from the storage watch, so a rejected write leaves the
+ * control looking dead. Log instead of vanishing. */
+const write = (run: Promise<unknown>) =>
+  run.catch((error: unknown) => console.error('[note-by-note] library write failed', error));
 
 class FavoritesStore {
-  entries = $state<FavoriteEntry[]>([]);
+  /** Derived, not a getter: the rows are rebuilt only when the library changes,
+   * not on every read while the Songs sheet renders. */
+  entries = $derived(favoriteEntries(library.current));
 
-  async init() {
-    this.entries = await favoritesItem.getValue();
-    favoritesItem.watch((value) => {
-      this.entries = value ?? [];
-    });
+  has(identity: TrackIdentity) { return library.current.shared.songs[identity.key]?.favoritedAt != null; }
+  toggle(entry: HistoryEntry) {
+    return write(editLibrary({ type: 'favorite', key: entry.identity.key,
+      value: library.current.shared.songs[entry.identity.key]?.favoritedAt == null }));
   }
-
-  /** By song, not by key: a favorite stored under a duration that has since
-   * drifted is still this track, and its star has to read as lit. */
-  has(identity: TrackIdentity): boolean {
-    return this.entries.some((e) => isSameTrack(e.identity, identity));
-  }
-
-  async toggle(entry: HistoryEntry) {
-    // Unstar the row as it was stored — its key may differ from this one's.
-    const existing = this.entries.find((e) => isSameTrack(e.identity, entry.identity));
-    // $state.snapshot: `entry` belongs to the history store, so it and its
-    // nested identity/params are proxies. Firefox structured-clones storage
-    // writes and throws DataCloneError on a proxy (Chrome, which serializes to
-    // JSON, does not) — without this the star silently never lights.
-    await write('toggle', () =>
-      existing
-        ? removeFavorite(existing.identity.key)
-        : addFavorite($state.snapshot(entry) as HistoryEntry),
-    );
-  }
-
-  async remove(key: string) {
-    await write('remove', () => removeFavorite(key));
-  }
-
-  /** Commit a new manual order (complete list of identity keys). Applied
-   * optimistically so the list doesn't snap back while storage round-trips. */
-  async reorder(keys: string[]) {
-    const byKey = new Map(this.entries.map((e) => [e.identity.key, e]));
-    const next = keys
-      .map((k) => byKey.get(k))
-      .filter((e): e is (typeof this.entries)[number] => e !== undefined);
-    if (next.length === this.entries.length) this.entries = next;
-    await write('reorder', () => setFavoritesOrder(keys));
-  }
+  remove(key: string) { return write(editLibrary({ type: 'favorite', key, value: false })); }
+  reorder(keys: string[]) { return write(editLibrary({ type: 'order', keys })); }
 }
-
 export const favorites = new FavoritesStore();

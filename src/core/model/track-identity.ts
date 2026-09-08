@@ -10,14 +10,17 @@ function normalizeUrl(rawUrl: string): string {
   } catch {
     return rawUrl;
   }
+  if (url.protocol === 'chrome-extension:' || url.protocol === 'moz-extension:') {
+    return `${url.protocol}//${url.host}${url.pathname}`;
+  }
 
   const host = url.hostname.replace(/^www\./, '');
 
   // Site-aware rules: keep only the media id where we know it.
-  if (host.endsWith('youtube.com')) {
-    const v = url.searchParams.get('v');
+  if (host === 'youtube.com' || host.endsWith('.youtube.com')) {
+    const v = url.searchParams.get('v') ?? /^\/(?:shorts|embed)\/([^/]+)/.exec(url.pathname)?.[1];
     if (v) return `https://youtube.com/watch?v=${v}`;
-    // Shorts / embeds carry the id in the path.
+    // Any other youtube path is its own page (a channel, a playlist view).
     return `https://youtube.com${url.pathname}`;
   }
   if (host === 'youtu.be') {
@@ -48,12 +51,15 @@ function hash(text: string): string {
   return (h >>> 0).toString(16);
 }
 
-/** Whether two library rows describe the same song. Deliberately not a `key`
- * comparison: the duration baked into `key` drifts (pre-roll ads, metadata that
- * settles late), which would split one song across several Recent rows. The
- * title is what keeps local files apart — they all share the local-player URL. */
-export function isSameTrack(a: TrackIdentity, b: TrackIdentity): boolean {
-  return a.normalizedUrl === b.normalizedUrl && a.title === b.title;
+/** Web media use a stable URL/provider ID; title and duration are metadata.
+ * Local files retain the existing filename discriminator. */
+export function songKey(identity: Pick<TrackIdentity, 'normalizedUrl' | 'title'>): string {
+  const url = identity.normalizedUrl;
+  if (url.startsWith('https://youtube.com/watch?v=')) return 'yt:' + url.slice('https://youtube.com/watch?v='.length);
+  // Local-player URLs include a browser-specific extension ID. The file name
+  // is the existing local-file discriminator; it must work across installations.
+  if (/^(chrome|moz)-extension:/.test(url)) return 'file:' + hash(cleanTitle(identity.title));
+  return 'web:' + hash(url);
 }
 
 export function makeTrackIdentity(
@@ -62,11 +68,11 @@ export function makeTrackIdentity(
   durationSec: number,
 ): TrackIdentity {
   const normalizedUrl = normalizeUrl(pageUrl);
-  const duration = Number.isFinite(durationSec) ? Math.round(durationSec) : 0;
+  const cleaned = cleanTitle(title);
   return {
-    key: `${hash(normalizedUrl)}:${duration}`,
+    key: songKey({ normalizedUrl, title: cleaned }),
     normalizedUrl,
-    title: cleanTitle(title),
-    durationSec: duration,
+    title: cleaned,
+    durationSec: Number.isFinite(durationSec) ? Math.round(durationSec) : 0,
   };
 }

@@ -1,131 +1,63 @@
-import { DEFAULT_KEYMAP, DEFAULT_SETTINGS, DEFAULT_UI_PREFS } from '../../../core/model/defaults';
 import type { PanelId, SectionId, Settings, UiPrefs } from '../../../core/model/types';
-import { settingsItem, uiPrefsItem } from '../../../core/persist/storage';
+import { mergeUiPrefs, type UiPrefsPatch } from '../../../core/persist/library';
+import { editLibrary, libraryItem } from '../../../core/persist/library-client';
+import { library } from '../../../core/state/library.svelte';
 
-/** Settings synced two-way with storage.local. Components mutate via `update`. */
+/** Views of the single library copy. All changes go through the background. */
 class SettingsStore {
-  current = $state<Settings>(structuredClone(DEFAULT_SETTINGS));
-  loaded = $state(false);
-  #writing = false;
+  current = $derived<Settings>({
+    ...library.current.shared.settings, lastUsedParams: library.current.local.lastUsedParams,
+  });
 
-  /** Wired by the connection layer, which pushes the engine-relevant settings
-   * to the tab. Fires on every path that lands a new value in
-   * `current` — the engine can't observe this store itself. */
-  onChange: ((next: Settings) => void) | null = null;
-
-  /** Stored settings may predate newly added fields — backfill from defaults so
-   * a missing key never reaches the engine as `undefined` (which the port drops,
-   * e.g. a NaN count-in duration that never elapses). */
-  #withDefaults(value: Settings | null): Settings {
-    return {
-      ...structuredClone(DEFAULT_SETTINGS),
-      ...value,
-      // Merged one level deeper: a keymap stored before an action existed would
-      // otherwise leave that action `undefined`, which the dispatcher can never
-      // match (the hotkey silently does nothing) and the Help sheet — which
-      // reads the keymap unconditionally — renders as a blank row.
-      keymap: { ...DEFAULT_KEYMAP, ...value?.keymap },
-    };
+  update(patch: Partial<Settings>) {
+    return editLibrary({ type: 'settings', patch: $state.snapshot(patch) });
   }
 
-  async init() {
-    this.current = this.#withDefaults(await settingsItem.getValue());
-    this.loaded = true;
-    settingsItem.watch((value) => {
-      if (this.#writing) return;
-      this.current = this.#withDefaults(value);
-      this.onChange?.(this.current);
-    });
-  }
-
-  async update(patch: Partial<Settings>) {
-    const next = { ...this.current, ...patch };
-    // Auto Reset and Remember settings are alternatives — enabling one
-    // switches the other off.
-    if (patch.rememberSettings) next.autoReset = false;
-    if (patch.autoReset) next.rememberSettings = false;
-    this.current = next;
-    this.onChange?.(next);
-    this.#writing = true;
-    try {
-      // $state.snapshot, like UiPrefsStore below: `next` is spread off the
-      // `current` rune, so nested `keymap`/`lastUsedParams` are still proxies.
-      // Firefox structured-clones storage writes and throws DataCloneError on a
-      // proxy — settings would apply for the session but never persist.
-      await settingsItem.setValue($state.snapshot(next) as Settings);
-    } finally {
-      this.#writing = false;
-    }
-  }
-
-  async reset() {
-    this.current = structuredClone(DEFAULT_SETTINGS);
-    this.onChange?.(this.current);
-    await settingsItem.setValue($state.snapshot(this.current) as Settings);
+  reset() {
+    return editLibrary({ type: 'settings', patch: {}, reset: true });
   }
 }
 
 class UiPrefsStore {
-  current = $state<UiPrefs>(structuredClone(DEFAULT_UI_PREFS));
-  #writing = false;
+  /** Preferences are device-local, so a toggle can show immediately instead of
+   * waiting for the service worker to wake, write and echo back. Held only until
+   * the saved copy matches, so another tab's panel still wins afterwards. */
+  #optimistic = $state.raw<UiPrefs | null>(null);
+  current = $derived(this.#optimistic ?? library.current.local.uiPrefs);
 
-  /** Stored values may predate newly added prefs — backfill from defaults. */
-  #withDefaults(value: UiPrefs | null): UiPrefs {
-    return { ...structuredClone(DEFAULT_UI_PREFS), ...value };
-  }
-
-  async init() {
-    this.current = this.#withDefaults(await uiPrefsItem.getValue());
-    uiPrefsItem.watch((value) => {
-      if (this.#writing) return;
-      this.current = this.#withDefaults(value);
+  init() {
+    libraryItem.watch((value) => {
+      if (this.#optimistic && JSON.stringify(value?.local.uiPrefs) === JSON.stringify(this.#optimistic)) {
+        this.#optimistic = null;
+      }
     });
   }
 
-  async #save() {
-    this.#writing = true;
-    try {
-      await uiPrefsItem.setValue($state.snapshot(this.current));
-    } finally {
-      this.#writing = false;
-    }
+  update(patch: UiPrefsPatch) {
+    this.#optimistic = mergeUiPrefs(this.current, patch);
+    // A rejected write must not keep showing a preference that was never saved.
+    // Nothing awaits these, so revert and report rather than throwing.
+    return editLibrary({ type: 'uiPrefs', patch }).catch((error: unknown) => {
+      this.#optimistic = null;
+      console.error('[note-by-note] saving preferences failed', error);
+    });
   }
 
   toggleCollapsed(panel: PanelId) {
-    this.current.collapsed[panel] = !this.current.collapsed[panel];
-    void this.#save();
+    return this.update({ collapsed: { [panel]: !this.current.collapsed[panel] } });
   }
 
   toggleSectionCollapsed(section: SectionId) {
-    this.current.collapsedSections[section] = !this.current.collapsedSections[section];
-    void this.#save();
+    return this.update({ collapsedSections: { [section]: !this.current.collapsedSections[section] } });
   }
 
-  setMarkerView(view: UiPrefs['markerView']) {
-    this.current.markerView = view;
-    void this.#save();
-  }
+  setMarkerView(markerView: UiPrefs['markerView']) { return this.update({ markerView }); }
+  setTimelineFollow(timelineFollow: boolean) { return this.update({ timelineFollow }); }
+  setFavoritesSort(favoritesSort: UiPrefs['favoritesSort']) { return this.update({ favoritesSort }); }
+  setLibraryTab(libraryTab: UiPrefs['libraryTab']) { return this.update({ libraryTab }); }
 
-  setTimelineFollow(on: boolean) {
-    this.current.timelineFollow = on;
-    void this.#save();
-  }
-
-  setFavoritesSort(sort: UiPrefs['favoritesSort']) {
-    this.current.favoritesSort = sort;
-    void this.#save();
-  }
-
-  setLibraryTab(tab: UiPrefs['libraryTab']) {
-    this.current.libraryTab = tab;
-    void this.#save();
-  }
-
-  /** Override a virtual boundary marker's label; empty text restores the
-   * default ("Start"/"End"). */
   setBoundaryLabel(which: 'start' | 'end', label: string) {
-    this.current.boundaryLabels[which] = label.trim();
-    void this.#save();
+    void this.update({ boundaryLabels: { [which]: label.trim() } });
   }
 }
 

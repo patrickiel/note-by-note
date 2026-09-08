@@ -1,21 +1,14 @@
 import { BUILTIN_EQ_PRESETS, EQ_BANDS } from '../../../core/model/defaults';
 import type { EqPreset } from '../../../core/model/types';
-import { deleteEqPreset, saveEqPreset } from '../persist/eq-presets';
-import { eqPresetsItem } from '../../../core/persist/storage';
+import { editLibrary } from '../../../core/persist/library-client';
+import { library } from '../../../core/state/library.svelte';
 
 /** Slider gains are multiples of 0.5 dB, so anything closer than this is the
  * same curve; the tolerance only guards against float drift. */
 const GAIN_EPSILON = 0.01;
 
 class EqPresetsStore {
-  saved = $state<EqPreset[]>([]);
-
-  async init() {
-    this.saved = await eqPresetsItem.getValue();
-    eqPresetsItem.watch((value) => {
-      this.saved = value ?? [];
-    });
-  }
+  saved = $derived(Object.entries(library.current.shared.presets).map(([name, gains]) => ({ name, gains })));
 
   /** Built-ins first, then the user's, as listed in the dropdown. */
   get all(): EqPreset[] {
@@ -39,11 +32,11 @@ class EqPresetsStore {
   }
 
   async save(name: string, gains: number[]) {
-    await saveEqPreset(name, gains);
+    await editLibrary({ type: 'preset', name, gains });
   }
 
   async remove(name: string) {
-    await deleteEqPreset(name);
+    await editLibrary({ type: 'preset', name, gains: null });
   }
 }
 

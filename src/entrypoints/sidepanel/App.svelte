@@ -5,14 +5,15 @@
   import LibraryView from '@/features/library/panel/LibraryView.svelte';
   import SettingsView from '@/features/settings/panel/SettingsView.svelte';
   import TooltipLayer from '@/ui/shared/TooltipLayer.svelte';
+  import LibraryRecovery from '@/ui/LibraryRecovery.svelte';
   import { sendMessage } from '@/core/messaging/rpc';
   import { openTabWithPanel } from '@/core/side-panel';
   import { installMockState, installMockTicker } from '@/dev/mock';
-  import { connection } from '@/core/state/connect.svelte';
+  import { connection, pushSettings } from '@/core/state/connect.svelte';
   import { CAN_CAPTURE_TAB } from '@/core/platform';
-  import { features } from '@/core/features';
+  import { library } from '@/core/state/library.svelte';
   import { session } from '@/core/state/session.svelte';
-  import { applyTheme, settings } from '@/features/settings/panel/settings.svelte';
+  import { applyTheme, settings, uiPrefs } from '@/features/settings/panel/settings.svelte';
   import { installShortcuts } from '@/features/shortcuts/panel/shortcuts';
   import { trackSync } from '@/core/state/track-sync.svelte';
   import { view } from '@/core/state/view.svelte';
@@ -22,11 +23,15 @@
   const mock = params.has('mock');
   // ?mock=1&play=1 also runs the playhead, for previewing time-driven UI.
   const mockPlay = mock && params.has('play');
-  // Each panel feature loads its own storage concurrently (see core/features.ts).
-  const ready = Promise.all(features.map((f) => f.init?.())).then(
+  $effect(() => applyTheme(settings.current.theme));
+  $effect(pushSettings);
+
+  // Only a saved-library failure belongs in the recovery screen.
+  const ready = library.init();
+  void ready.then(
     async () => {
-      applyTheme(settings.current.theme);
       trackSync.init();
+      uiPrefs.init();
       session.onMediaEvent = (media) => {
         trackSync.onMedia(media).catch((err: unknown) => {
           console.error('[note-by-note] track sync failed', err);
@@ -44,14 +49,14 @@
         };
       }
       installShortcuts();
-      // Fire-and-forget: opening the panel must not wait on the network.
+      // Fire-and-forget: opening the panel must not wait on storage.
       void sync.init();
       if (mock) {
         installMockState();
         if (mockPlay) installMockTicker();
       } else await connection.init();
     },
-  );
+  ).catch((error) => console.error('[note-by-note] initializing panel failed', error));
 
   // Opened from here rather than via the background: the side panel has to
   // follow the user to the player tab, and only this document holds the
@@ -70,6 +75,11 @@
     else void connection.stopCapture();
   }
 </script>
+
+<svelte:window onpagehide={() => trackSync.flush()} />
+<svelte:document onvisibilitychange={() => {
+  if (document.visibilityState === 'hidden') trackSync.flush();
+}} />
 
 {#await ready then}
   <div class="relative h-full overflow-hidden">
@@ -100,4 +110,6 @@
     <!-- Last child, fixed-positioned: one bubble that outranks every sheet. -->
     <TooltipLayer />
   </div>
+{:catch error}
+  <LibraryRecovery {error} />
 {/await}

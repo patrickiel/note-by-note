@@ -1,27 +1,12 @@
-import type { HistoryEntry } from '../../../core/model/types';
-import { clearHistory, dedupeHistory, removeHistoryEntry } from '../persist/history';
-import { historyItem } from '../../../core/persist/storage';
+import { recentEntries } from '../../../core/persist/library';
+import { editLibrary } from '../../../core/persist/library-client';
+import { library } from '../../../core/state/library.svelte';
 
 class HistoryStore {
-  entries = $state<HistoryEntry[]>([]);
+  /** Derived, not a getter: see the note in favorites.svelte.ts. */
+  entries = $derived(recentEntries(library.current));
 
-  async init() {
-    // Rows saved before dedupe-on-write can already be duplicated; collapse
-    // them once, on the way in, so the list the user sees is the stored one.
-    await dedupeHistory();
-    this.entries = await historyItem.getValue();
-    historyItem.watch((value) => {
-      this.entries = value ?? [];
-    });
-  }
-
-  async remove(key: string) {
-    await removeHistoryEntry(key);
-  }
-
-  async clear() {
-    await clearHistory();
-  }
+  remove(key: string) { return editLibrary({ type: 'recent.remove', key }); }
+  clear() { return editLibrary({ type: 'recent.remove' }); }
 }
-
 export const history = new HistoryStore();

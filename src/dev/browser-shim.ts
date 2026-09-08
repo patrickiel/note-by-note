@@ -1,3 +1,4 @@
+import { applyCommand, emptyLibrary, type LibraryCommand } from '../core/persist/library';
 /** Dev-only: lets the side panel render in a plain browser tab (UI preview /
  * screenshots) by installing a minimal in-memory `chrome` polyfill. No-op when
  * real extension APIs exist. Import FIRST in the entrypoint. */
@@ -91,7 +92,13 @@ if (!existing?.storage) {
         onMessage: makeEvent(),
         onDisconnect: makeEvent(),
       }),
-      sendMessage: async () => undefined,
+      sendMessage: async (message: { type: string; data: LibraryCommand }) => {
+        const stored = await shim.storage.local.get('library');
+        const library = (stored.library ?? emptyLibrary()) as ReturnType<typeof emptyLibrary>;
+        if (message.type === 'libraryRead') return { res: library };
+        if (message.type === 'libraryEdit') await shim.storage.local.set({ library: applyCommand(library, message.data) });
+        return { res: undefined };
+      },
     },
     tabs: {
       query: async () => [],

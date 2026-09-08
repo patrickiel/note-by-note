@@ -50,8 +50,8 @@ draws a chart under the timeline.
 **Keeping your place.** Settings are stored per track against a normalized URL,
 so reopening a video brings back its pitch, speed, markers, loops and snippets —
 however you open it, not just from the library. Favorites and
-recents live in a library tab, and optional cross-device sync pushes a snapshot
-to a small Cloudflare Worker.
+recents live in a library tab, and optional cross-device sync carries saved practice data and favorites
+to your other browsers through the browser's own sync — no server, no account.
 
 ## Installing it
 
@@ -116,8 +116,8 @@ the engine.
 
 ## Tests
 
-`pnpm test:dsp` runs the DSP unit tests under `node --test`: the center-cut
-math, the CQT, chord decoding. Fast, no browser.
+`pnpm test:dsp` runs the unit tests under `node --test`: the center-cut
+math, the CQT, chord decoding, library migration, snapshot selection, backups and sync transport. Fast, no browser.
 
 The e2e harness is the interesting one. It launches Chrome for Testing with the
 extension installed, plays a 440 Hz tone, and asserts on the *processed output* —
@@ -162,40 +162,47 @@ the other way round.
   extension means reloading the page too.
 - `note-by-note-center-cut` is a string literal on both sides of the worklet
   boundary — `tsc` won't catch a mismatch, you'll get an `InvalidStateError`.
-- The e2e suite passes 22 of 30 checks. The audio path is solid; the failures
-  are in marker chips, loop/sequence bounds, the tab-capture CTA and the
-  vocal-reducer control — known and pre-existing.
+- `node e2e/run.mjs` prints a pass/fail tally for the playback suite;
+  `node e2e/library.mjs` (`pnpm test:e2e:library`) additionally checks concurrent
+  library edits, remote updates, restart recovery and sync capacity.
 
-## Sync server
+## Sync
 
-`server/` is a separate pnpm workspace (its own lockfile and tsconfig): a
-Cloudflare Worker plus KV storing one backup snapshot per sync ID, last write
-wins. There are no accounts. The 43-character sync ID *is* the credential, so
-treat it like a password. Deploy notes in [server/README.md](server/README.md).
+Saved practice data, favorites, EQ presets and settings sync through the browser's
+own extension storage. Recent, panel layout, last-used parameters and generated
+chord analysis stay on the device. Audio is never transferred.
 
-The ID travels in an `X-Sync-Id` header rather than the URL, because URLs are
-recorded verbatim by request logs, and KV is keyed by its SHA-256 so the raw
-token isn't stored either. Writes are rate-limited per IP and snapshots carry a
-180-day TTL, refreshed on every write.
+One saved song owns its parameters, markers and snippets. Recent and Favorites
+are views of that song, so there are no saved-settings copies to keep aligned.
+The background is the only library writer; it handles edits, imports and remote
+updates even when the panel is closed. Each panel loads and watches one library;
+settings, UI preferences, presets and song lists read that same copy.
+An active practice session keeps its loaded configuration when sync arrives.
+An explicit backup import reloads open songs with the imported practice settings
+and cancels pending edits from before the import. Sync never reloads the panel.
 
-A snapshot is your settings, UI preferences, EQ presets, Recent and Favorites
-(page URL, title, duration, thumbnail URL) and per-track data (markers with your
-labels, loop ranges, snippets, chord charts). **No audio, ever.** It is stored
-unencrypted, so whoever operates the Worker can read it — run your own if that
-matters to you. Sync is on by default but only mints an ID once you have
-something to sync; `Settings → Sync → Delete synced data` removes the server
-copy. Nothing else in the extension talks to the network: there is no telemetry
-and no analytics.
+Local storage and sync use the same shared library snapshot, with one timestamp.
+The most recently edited snapshot replaces the older copy in full. On equal
+timestamps the synced copy wins. Edits made on two devices at once can overwrite
+each other, even when they affect different songs; there are no field merges or
+deletion markers.
 
-The ID lives in the browser's synced extension storage, so a second device on
-the same profile picks it up by itself. The browser wipes that storage (on
-every device) when the extension is uninstalled, so the ID can also be kept as
-a cookie on the sync server's domain, which outlives the extension — that is
-what the `cookies` permission and the optional access to that one domain are
-for (`Settings → Sync → Keep the ID after a reinstall`; the **Connect** grant
-covers it too). How and why, and what it does not survive, is documented in
-[id-cookie.ts](src/features/sync/panel/id-cookie.ts). Self-hosters change the
-URL in [sync-hosts.ts](src/features/sync/sync-hosts.ts) and rebuild.
+The snapshot is gzip-compressed and split across fixed storage slots to fit the
+browser's 8 KB item limit. A content hash ensures all parts belong to the same
+complete snapshot before it is used. If the library exceeds sync capacity,
+Settings reports an error and retains the complete local library and the last
+successful synced copy. Songs are not automatically discarded to make it fit.
+Export a backup to transfer all data, including local history and analysis.
+
+Backups are readable version-2 JSON containing shared and local sections. Imports
+also accept the released version-1 format, converting it once.
+Importing a backup replaces the entire library and dates it
+as a new edit for sync, including removal of songs absent from the file. Old local
+storage is retained as a recovery copy after the first migration. Upgrade all
+devices before using the new sync format; older builds cannot read it.
+Automatic migration recovers valid songs and fields independently of damaged
+records. If a saved library cannot be opened, the panel offers retry, recovery
+export and backup import; importing retains a copy of the damaged library locally.
 
 ## License
 
