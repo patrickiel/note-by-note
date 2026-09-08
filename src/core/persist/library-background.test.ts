@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { applyCommand, emptyLibrary } from './library.ts';
 import { makeTrackIdentity } from '../model/track-identity.ts';
 import { bytesUsed, encodeSnapshot, readSnapshot, PREFIX, SNAPSHOT_KEY } from '../../features/sync/persist/records.ts';
+import { randomBytes } from 'node:crypto';
 
 // Bundle the real worker with only its browser/RPC boundaries replaced. Each
 // start gets fresh queues and listeners while its saved storage/alarms survive.
@@ -197,4 +198,58 @@ test('adopting headerless remote data dates the pull even while header repair is
   assert.deepEqual(h.areas.local.library.shared, remote);
   assert.equal(h.areas.local.syncConfig.lastSyncedAt, 100000);
   assert.equal(h.writes.filter((w) => w.area === 'sync').length, 0);
+});
+
+test('an over-budget library uploads a trimmed copy, saves it and then settles', async (t) => {
+  t.mock.method(Date, 'now', () => 500000);
+  let library = emptyLibrary();
+  const keys: string[] = [];
+  for (let n = 0; n < 40; n++) {
+    const identity = makeTrackIdentity(`https://youtube.com/watch?v=song${n}`, `Song ${n}`, 200);
+    keys.push(identity.key);
+    library = applyCommand(library, { type: 'practice', identity,
+      patch: { markers: [{ id: 'm', t: 1, label: randomBytes(4000).toString('base64') }] }, recent: true }, 100 + n);
+    library = applyCommand(library, { type: 'chart', key: identity.key, chart: null }, 100 + n);
+  }
+  library = applyCommand(library, { type: 'favorite', key: keys[0], value: true }, 1000);
+  await assert.rejects(encodeSnapshot(library.shared), /storage is full/);
+
+  const h = harness({ library, syncConfig: config });
+  await h.start();
+  const stored = h.areas.local.library;
+  const uploaded = (await readSnapshot(h.areas.sync))!;
+  // The saved library and the upload are the same trimmed snapshot, re-dated so
+  // no other device can push the dropped songs back.
+  assert.deepEqual(stored.shared, uploaded);
+  assert.ok(uploaded.updatedAt > library.shared.updatedAt);
+  const dropped = keys.filter((key) => !uploaded.songs[key]);
+  assert.ok(dropped.length > 0);
+  assert.ok(!dropped.includes(keys[0]));
+  for (const key of dropped) {
+    assert.ok(!(key in stored.local.recent), `${key} left in recent`);
+    assert.ok(!(key in stored.local.lastAccessed), `${key} left in lastAccessed`);
+    assert.ok(!(key in stored.local.charts), `${key} left in charts`);
+  }
+  assert.equal(h.areas.local.syncConfig.lastError, null);
+  assert.equal(h.areas.local.syncConfig.usedBytes, bytesUsed(h.areas.sync));
+
+  h.writes.length = 0;
+  await h.rpc('librarySync', 'now');
+  assert.deepEqual(h.writes, []);
+});
+
+test('an overflow of favorites alone keeps the library and reports the failure', async (t) => {
+  t.mock.method(Date, 'now', () => 500000);
+  let library = emptyLibrary();
+  for (let n = 0; n < 40; n++) {
+    const identity = makeTrackIdentity(`https://youtube.com/watch?v=fav${n}`, `Fav ${n}`, 200);
+    library = applyCommand(library, { type: 'practice', identity,
+      patch: { markers: [{ id: 'm', t: 1, label: randomBytes(4000).toString('base64') }] }, recent: true }, 100 + n);
+    library = applyCommand(library, { type: 'favorite', key: identity.key, value: true }, 1000);
+  }
+  const h = harness({ library, syncConfig: config });
+  await h.start();
+  assert.deepEqual(h.areas.local.library, library);
+  assert.equal(h.writes.filter((w) => w.area === 'sync').length, 0);
+  assert.match(h.areas.local.syncConfig.lastError, /storage is full/);
 });

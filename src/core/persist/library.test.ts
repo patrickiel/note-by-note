@@ -220,3 +220,23 @@ test('preset names matching object properties can be saved, backed up and delete
   library = applyCommand(library, { type: 'preset', name: '__proto__', gains: null });
   assert.deepEqual(Object.keys(library.shared.presets), ['constructor']);
 });
+
+test('clearing history also removes saved songs that no list can reach', () => {
+  const hidden = makeTrackIdentity('https://www.youtube.com/watch?v=hidden', 'Hidden', 100);
+  const kept = makeTrackIdentity('https://www.youtube.com/watch?v=kept', 'Kept', 100);
+  // Auto Save off: saved with its practice data, never added to Recent.
+  let library = applyCommand(save(), { type: 'practice', identity: hidden,
+    patch: { markers: [{ id: 'm', t: 1, label: 'Solo' }] }, recent: false }, 200);
+  library = applyCommand(library, { type: 'practice', identity: kept, patch: {}, recent: false }, 300);
+  library = applyCommand(library, { type: 'favorite', key: kept.key, value: true }, 400);
+  assert.deepEqual(recentEntries(library).map((entry) => entry.identity.key), [identity.key]);
+  assert.equal(library.shared.songs[hidden.key].practice.markers?.length, 1);
+
+  const cleared = applyCommand(library, { type: 'recent.remove' }, 500);
+  assert.deepEqual(Object.keys(cleared.shared.songs), [kept.key]);
+  assert.deepEqual(cleared.local.recent, {});
+  assert.deepEqual(Object.keys(cleared.local.lastAccessed), [kept.key]);
+  assert.deepEqual(favoriteEntries(cleared).map((entry) => entry.identity.key), [kept.key]);
+  // Removing one song still only touches that song.
+  assert.ok(applyCommand(library, { type: 'recent.remove', key: identity.key }, 500).shared.songs[hidden.key]);
+});

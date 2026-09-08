@@ -18,7 +18,7 @@
     parseBackup,
     restoreBackup,
   } from '@/core/persist/backup';
-  import { history } from '@/features/library/panel/history';
+  import { history } from '@/features/library/panel/history.svelte';
   import { settings } from '@/features/settings/panel/settings.svelte';
   import { session } from '@/core/state/session.svelte';
   import { view } from '@/core/state/view.svelte';
@@ -105,7 +105,7 @@
   }
 
   function clearHistoryConfirmed() {
-    if (confirm('Remove every song in Recent, with its markers, snippets and settings? Favorites are kept.')) {
+    if (confirm('Remove every saved song that is not a Favorite, with its markers, snippets and settings?')) {
       void history.clear();
     }
   }
@@ -602,7 +602,7 @@
         <span class="flex-none flex justify-center w-6 text-muted"
           ><Icon name="clearAll" size={18} /></span
         >
-        {@render prefText('Clear history', 'Delete every song in the Recent list, with its markers and snippets. Favorites are kept.')}
+        {@render prefText('Clear history', 'Delete every saved song that is not a Favorite, with its markers and snippets — including songs no longer listed in Recent.')}
         <button
           type="button"
           class="flex-none py-1 px-2 text-[13px] font-bold text-accent-ink rounded-sm hover:not-disabled:bg-accent-soft disabled:opacity-40 disabled:cursor-default"

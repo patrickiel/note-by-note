@@ -3,7 +3,7 @@ import { applyCommand, emptyLibrary, newestSnapshot, type Library } from './libr
 import { libraryItem } from './library-client';
 import { parseLibrary } from './backup-codec';
 import { recoverLegacyStorage } from './library-recovery';
-import { bytesUsed, encodeSnapshot, hash, IncompleteSnapshot, PREFIX, readSnapshot, SNAPSHOT_KEY } from '../../features/sync/persist/records';
+import { bytesUsed, encodeSnapshot, fitSnapshot, hash, IncompleteSnapshot, PREFIX, readSnapshot, SNAPSHOT_KEY } from '../../features/sync/persist/records';
 import { loadSyncConfig, syncConfigItem } from '../../features/sync/persist/sync-config';
 
 const WAKE = 'library-sync';
@@ -71,9 +71,10 @@ export function startLibraryBackground() {
       });
       const shared = remote ? newestSnapshot(local.shared, remote) : local.shared;
       const adopting = shared !== local.shared;
+      let current = adopting ? { ...local, shared } : local;
       if (adopting) {
         await begin();
-        await libraryItem.setValue({ ...local, shared });
+        await libraryItem.setValue(current);
         config.lastSyncedAt = Date.now();
       }
       config.lastError = null;
@@ -83,7 +84,25 @@ export function startLibraryBackground() {
       if (uploading) {
         if (Date.now() < config.lastPushAt + PUSH_INTERVAL) { await schedule(); return; }
         await begin();
-        const { items, usedBytes } = await encodeSnapshot(shared, existing);
+        const fitted = await fitSnapshot(shared, current.local.lastAccessed, existing);
+        let { items, usedBytes } = fitted;
+        if (fitted.dropped.length) {
+          // Re-dated so the trimmed copy is the one winner: left on the old
+          // revision, another device's full snapshot would push the songs we
+          // just dropped straight back. Saved before uploading, so the local
+          // library and the uploaded one stay the same snapshot.
+          const trimmed = { ...fitted.shared, updatedAt: Math.max(Date.now(), shared.updatedAt + 1) };
+          const device = { ...current.local, recent: { ...current.local.recent },
+            lastAccessed: { ...current.local.lastAccessed }, charts: { ...current.local.charts } };
+          for (const key of fitted.dropped) {
+            delete device.recent[key];
+            delete device.lastAccessed[key];
+            delete device.charts[key];
+          }
+          current = { shared: trimmed, local: device };
+          await libraryItem.setValue(current);
+          ({ items, usedBytes } = await encodeSnapshot(trimmed, existing));
+        }
         await browser.storage.sync.set(items);
         config.lastPushAt = Date.now();
         config.usedBytes = usedBytes;

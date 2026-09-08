@@ -5,7 +5,7 @@ import { compileModule } from 'svelte/compiler';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { applyCommand, emptyLibrary, type Library, type LibraryCommand } from '../persist/library.ts';
-import { DEFAULT_PARAMS } from '../model/defaults.ts';
+import { DEFAULT_PARAMS, DEFAULT_UI_PREFS } from '../model/defaults.ts';
 import { makeTrackIdentity } from '../model/track-identity.ts';
 
 const stubs: Record<string, string> = {
@@ -36,9 +36,9 @@ async function bundle(file: string) {
     } }] });
   return built.outputFiles[0].text;
 }
-const [trackCode, syncCode, connectionCode, sessionCode] = await Promise.all([
+const [trackCode, syncCode, connectionCode, sessionCode, settingsCode] = await Promise.all([
   bundle('./track-sync.svelte.ts'), bundle('../../features/sync/panel/sync.svelte.ts'), bundle('./connect.svelte.ts'),
-  bundle('./session.svelte.ts'),
+  bundle('./session.svelte.ts'), bundle('../../features/settings/panel/settings.svelte.ts'),
 ]);
 let instance = 0;
 const load = (code: string) => import('data:text/javascript;base64,' + Buffer.from(code).toString('base64') + '#' + instance++);
@@ -368,4 +368,36 @@ test('an injection RPC rejection uses connection state and keeps reconnect liste
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(attempts, 2);
   assert.ok(send.mock.calls.some((call) => (call.arguments[0] as any)?.type === 'hello'));
+});
+
+test('a preference shows before the worker answers, survives an unrelated write and reverts on failure', async (t) => {
+  const h = await harness(emptyLibrary());
+  h.autoPublish = false;
+  const { uiPrefs } = await load(settingsCode);
+  uiPrefs.init();
+  assert.equal(uiPrefs.current.markerView, DEFAULT_UI_PREFS.markerView);
+
+  // The toggle lands immediately; nothing waits on the service worker.
+  const pending = uiPrefs.setMarkerView('list');
+  assert.equal(uiPrefs.current.markerView, 'list');
+  await pending;
+  assert.equal(uiPrefs.current.markerView, 'list');
+  // Nested groups merge like the writer does: other panels keep their state.
+  await uiPrefs.toggleCollapsed('pitch');
+  assert.equal(uiPrefs.current.collapsed.pitch, !DEFAULT_UI_PREFS.collapsed.pitch);
+  assert.equal(uiPrefs.current.collapsed.speed, DEFAULT_UI_PREFS.collapsed.speed);
+  assert.equal(uiPrefs.current.markerView, 'list');
+
+  // Once the saved copy catches up the overlay is dropped, so another panel wins.
+  h.publish();
+  assert.equal(uiPrefs.current, h.library.current.local.uiPrefs);
+  h.autoPublish = true;
+  await uiPrefs.setLibraryTab('favorites');
+  assert.equal(uiPrefs.current, h.library.current.local.uiPrefs);
+  assert.equal(uiPrefs.current.libraryTab, 'favorites');
+
+  t.mock.method(console, 'error', () => {});
+  h.edit = async () => { throw new Error('Worker restarted'); };
+  await uiPrefs.setMarkerView('blocks');
+  assert.equal(uiPrefs.current.markerView, 'list');
 });

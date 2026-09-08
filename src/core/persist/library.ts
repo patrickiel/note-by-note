@@ -53,6 +53,16 @@ export type UiPrefsPatch = {
   [K in keyof UiPrefs]?: UiPrefs[K] extends object ? Partial<UiPrefs[K]> : UiPrefs[K];
 };
 
+/** Shared with the panel, which shows a preference before the writer confirms it. */
+export function mergeUiPrefs(current: UiPrefs, patch: UiPrefsPatch): UiPrefs {
+  return {
+    ...current, ...patch,
+    collapsed: { ...current.collapsed, ...patch.collapsed },
+    collapsedSections: { ...current.collapsedSections, ...patch.collapsedSections },
+    boundaryLabels: { ...current.boundaryLabels, ...patch.boundaryLabels },
+  };
+}
+
 export type LibraryCommand =
   | { type: 'practice'; identity: TrackIdentity; patch: Partial<Practice>; recent: boolean; importRevision?: number }
   | { type: 'favorite'; key: string; value: boolean }
@@ -106,7 +116,11 @@ export function applyCommand(library: Library, command: LibraryCommand, now = Da
       break;
     }
     case 'recent.remove': {
-      const keys = command.key === undefined ? Object.keys(local.recent) : [command.key];
+      // Clearing history also forgets songs no list can reach: ones pushed past
+      // HISTORY_LIMIT, and ones saved while Auto Save was off.
+      const keys = command.key === undefined
+        ? [...new Set([...Object.keys(local.recent), ...Object.keys(shared.songs)])]
+        : [command.key];
       for (const key of keys) {
         delete local.recent[key];
         if (shared.songs[key]?.favoritedAt != null) continue;
@@ -126,15 +140,7 @@ export function applyCommand(library: Library, command: LibraryCommand, now = Da
       if (command.reset) delete local.lastUsedParams;
       break;
     }
-    case 'uiPrefs': {
-      local.uiPrefs = {
-        ...local.uiPrefs, ...command.patch,
-        collapsed: { ...local.uiPrefs.collapsed, ...command.patch.collapsed },
-        collapsedSections: { ...local.uiPrefs.collapsedSections, ...command.patch.collapsedSections },
-        boundaryLabels: { ...local.uiPrefs.boundaryLabels, ...command.patch.boundaryLabels },
-      };
-      break;
-    }
+    case 'uiPrefs': local.uiPrefs = mergeUiPrefs(local.uiPrefs, command.patch); break;
     case 'preset': {
       if (command.gains === null) delete shared.presets[command.name];
       else defineEntry(shared.presets, command.name, command.gains);

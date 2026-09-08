@@ -13,7 +13,7 @@
   import { CAN_CAPTURE_TAB } from '@/core/platform';
   import { library } from '@/core/state/library.svelte';
   import { session } from '@/core/state/session.svelte';
-  import { applyTheme, settings } from '@/features/settings/panel/settings.svelte';
+  import { applyTheme, settings, uiPrefs } from '@/features/settings/panel/settings.svelte';
   import { installShortcuts } from '@/features/shortcuts/panel/shortcuts';
   import { trackSync } from '@/core/state/track-sync.svelte';
   import { view } from '@/core/state/view.svelte';
@@ -31,6 +31,7 @@
   void ready.then(
     async () => {
       trackSync.init();
+      uiPrefs.init();
       session.onMediaEvent = (media) => {
         trackSync.onMedia(media).catch((err: unknown) => {
           console.error('[note-by-note] track sync failed', err);

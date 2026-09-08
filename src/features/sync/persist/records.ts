@@ -63,7 +63,7 @@ export async function readSnapshot(items: Record<string, any>): Promise<SharedLi
 }
 
 /** Upload the entire snapshot or report capacity failure before changing storage. */
-export async function encodeSnapshot(shared: SharedLibrary, existing: Record<string, unknown> = {}) {
+export async function encodeSnapshot(shared: SharedLibrary, existing: Record<string, unknown> = {}): Promise<{ items: Record<string, unknown>; usedBytes: number }> {
   const data = await compress(JSON.stringify(shared));
   const items: Record<string, unknown> = {
     [SNAPSHOT_KEY]: { version: 1, updatedAt: shared.updatedAt, chunks: Math.ceil(data.length / CHUNK_SIZE), hash: await hash(data) },
@@ -76,4 +76,50 @@ export async function encodeSnapshot(shared: SharedLibrary, existing: Record<str
     throw new Error('Browser sync storage is full. All data is kept on this device; export a backup to transfer it.');
   }
   return { items, usedBytes };
+}
+
+/**
+ * The same upload, made to fit by dropping the least recently used songs that
+ * are not favorites. Settings, presets, favorite order, every favorite and the
+ * song in hand are kept, so an overflow of those alone still reports capacity
+ * failure rather than trimming its way to an empty library.
+ *
+ * Dropping more songs can only shrink the payload, so the smallest prefix that
+ * fits is found by bisection — a handful of compressions instead of one per song.
+ */
+export async function fitSnapshot(shared: SharedLibrary, lastAccessed: Record<string, number>,
+  existing: Record<string, unknown> = {}) {
+  const age = (key: string) => lastAccessed[key] ?? shared.songs[key].practice.updatedAt;
+  // The song being practised right now is never a candidate: one song too big to
+  // sync must report capacity failure, not empty the library to make itself fit.
+  const droppable = Object.keys(shared.songs)
+    .filter((key) => shared.songs[key].favoritedAt == null)
+    .sort((a, b) => age(a) - age(b))
+    .slice(0, -1);
+  const without = (count: number): SharedLibrary => {
+    if (count === 0) return shared;
+    const dropped = new Set(droppable.slice(0, count));
+    return { ...shared, songs: Object.fromEntries(Object.entries(shared.songs).filter(([key]) => !dropped.has(key))) };
+  };
+  const attempt = async (count: number) => {
+    try { return { ok: true as const, count, ...await encodeSnapshot(without(count), existing) }; }
+    catch (error) { return { ok: false as const, error }; }
+  };
+
+  const whole = await attempt(0);
+  if (whole.ok) return { items: whole.items, usedBytes: whole.usedBytes, shared, dropped: [] as string[] };
+  if (!droppable.length) throw whole.error;
+  // The bisection assumes both ends are known: everything still over budget has
+  // nothing left to give up, so report the original capacity failure.
+  let fitted = await attempt(droppable.length);
+  if (!fitted.ok) throw fitted.error;
+  let lo = 1;
+  let hi = droppable.length;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    const result = await attempt(mid);
+    if (result.ok) { fitted = result; hi = mid; } else lo = mid + 1;
+  }
+  return { items: fitted.items, usedBytes: fitted.usedBytes,
+    shared: without(fitted.count), dropped: droppable.slice(0, fitted.count) };
 }

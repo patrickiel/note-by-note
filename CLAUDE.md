@@ -93,7 +93,7 @@ Both worklet processors are shipped as **static files under `public/worklets/`**
 Runes stores (classes with `$state`), one singleton exported per file. All panel-side. Split by ownership:
 - **Core (`src/core/state/`):** `session` mirrors the active tab's engine and provides panel commands; `library` holds the panel's single saved-data snapshot; `connection` owns permissions, injection, port lifecycle and capture, routing chord events directly; `track-sync` loads saved practice data and wires feature edits; `view` selects the open panel.
 - **Feature-owned (`src/features/<f>/panel/`):** `markers`, `snippets`, `chords`, `settings`, `favorites`/`history` (library), `eq-presets`, `shortcuts`. Preview data (`mock`) lives in `src/dev/`.
-- App loads the library once. Settings, UI preferences, presets and song lists derive from it; App effects apply the theme and send engine settings. Features submit per-track edits through track-sync.
+- App loads the library once. Settings, UI preferences, presets and song lists derive from it; App effects apply the theme and send engine settings. Features submit per-track edits through track-sync. UI preferences are device-local: the panel shows an edit at once and drops the overlay when the storage watch confirms it, so a toggle never waits on the worker.
 
 ### Persistence & sync
 
@@ -101,7 +101,10 @@ Runes stores (classes with `$state`), one singleton exported per file. All panel
   UI preferences, last-used parameters and analysis. See core/persist/library.ts.
 - The background service is the only writer (library-background.ts). Panels use
   library-client.ts commands and one storage watch. Commands patch the latest saved
-  data; Recent and Favorites are projections, not persistent song copies.
+  data; Recent and Favorites are projections, not persistent song copies. A saved
+  song outlives Recent (its practice returns when the page is replayed, which is
+  what Auto Save off relies on); clearing history is what removes every
+  non-favorited song, listed or not.
 - Track-sync loads a practice session once and submits edits to the saved library.
   Restoration uses the initialized panel mirror and does not emit user edits.
   Parameter, marker and snippet edits capture their track and values before being
@@ -115,11 +118,14 @@ Runes stores (classes with `$state`), one singleton exported per file. All panel
   failures use connection state; only library initialization can open recovery.
 - Sync copies the same SharedLibrary snapshot used locally (records.ts). One
   updatedAt timestamp chooses the whole winner; equal dates adopt the remote copy.
-  There are no field merges, deletion markers, or automatic song pruning. Song
-  dates only support display and sorting. Gzip data spans fixed size-limited slots;
-  a hash prevents partial or mixed snapshots from being applied. Capacity failures
-  preserve local data and the last successful upload. Background alarms retry
-  independently of panels.
+  There are no field merges or deletion markers. Song dates only support display
+  and sorting. Gzip data spans fixed size-limited slots; a hash prevents partial or
+  mixed snapshots from being applied. An over-budget upload drops the least
+  recently used non-favorited songs (fitSnapshot bisects for the smallest cut) and
+  saves that re-dated trimmed copy locally, so the library and the upload stay one
+  snapshot; nothing is trimmed while sync is off, and an overflow of favorites
+  alone still fails, preserving local data and the last successful upload.
+  Background alarms retry independently of panels.
   Identical snapshots do not rewrite storage or toggle sync status. Missing
   headers are recovered from complete gzip chunks; partial headerless uploads
   get a persisted grace period before repair from the complete local copy.

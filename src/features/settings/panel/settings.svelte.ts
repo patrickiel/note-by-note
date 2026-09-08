@@ -1,6 +1,6 @@
 import type { PanelId, SectionId, Settings, UiPrefs } from '../../../core/model/types';
-import type { UiPrefsPatch } from '../../../core/persist/library';
-import { editLibrary } from '../../../core/persist/library-client';
+import { mergeUiPrefs, type UiPrefsPatch } from '../../../core/persist/library';
+import { editLibrary, libraryItem } from '../../../core/persist/library-client';
 import { library } from '../../../core/state/library.svelte';
 
 /** Views of the single library copy. All changes go through the background. */
@@ -19,10 +19,28 @@ class SettingsStore {
 }
 
 class UiPrefsStore {
-  current = $derived(library.current.local.uiPrefs);
+  /** Preferences are device-local, so a toggle can show immediately instead of
+   * waiting for the service worker to wake, write and echo back. Held only until
+   * the saved copy matches, so another tab's panel still wins afterwards. */
+  #optimistic = $state.raw<UiPrefs | null>(null);
+  current = $derived(this.#optimistic ?? library.current.local.uiPrefs);
+
+  init() {
+    libraryItem.watch((value) => {
+      if (this.#optimistic && JSON.stringify(value?.local.uiPrefs) === JSON.stringify(this.#optimistic)) {
+        this.#optimistic = null;
+      }
+    });
+  }
 
   update(patch: UiPrefsPatch) {
-    return editLibrary({ type: 'uiPrefs', patch });
+    this.#optimistic = mergeUiPrefs(this.current, patch);
+    // A rejected write must not keep showing a preference that was never saved.
+    // Nothing awaits these, so revert and report rather than throwing.
+    return editLibrary({ type: 'uiPrefs', patch }).catch((error: unknown) => {
+      this.#optimistic = null;
+      console.error('[note-by-note] saving preferences failed', error);
+    });
   }
 
   toggleCollapsed(panel: PanelId) {
